@@ -20,13 +20,14 @@ let db = load();
 function load() {
   try {
     const d = JSON.parse(localStorage.getItem(KEY));
-    if (d && d.patients && d.entries) return migrate({ status: {}, settings: { lead: 10 }, cats: [], ...d });
+    if (d && d.patients && d.entries) return migrate({ status: {}, settings: { lead: 10 }, cats: [], surgeries: [], ...d });
   } catch (e) {}
-  return { patients: [], entries: [], status: {}, settings: { lead: 10 }, cats: [] };
+  return { patients: [], entries: [], status: {}, settings: { lead: 10 }, cats: [], surgeries: [] };
 }
 /* v1 → v2: 이동방식은 환자가 아니라 일정(entry)의 속성, 치료는 카테고리(cats) 참조 */
 function migrate(d) {
   d.cats = d.cats || [];
+  d.surgeries = d.surgeries || [];
   const P = id => d.patients.find(p => p.id === id);
   for (const e of d.entries) {
     if (!e.mob) e.mob = P(e.pid)?.mob || 'walk';
@@ -61,9 +62,12 @@ const fmtDate = s => {
 };
 const patient = id => db.patients.find(p => p.id === id);
 const mobOf = e => (MOB[e.mob] ? e.mob : 'walk');
-const catOf = e => db.cats.find(c => c.id === e.tid);
-const txLabel = e => catOf(e)?.label || '(치료 미지정)';
-const txPill = e => `<button class="pill" data-act="pill" data-id="${e.id}">${esc(txLabel(e))}${catOf(e)?.memo ? ' <i>ⓘ</i>' : ''}</button>`;
+const isSx = e => e.kind === 'sx';
+const catOf = e => isSx(e) ? null : db.cats.find(c => c.id === e.tid);
+const txLabel = e => isSx(e) ? `수술 ${e.name}` : (catOf(e)?.label || '(치료 미지정)');
+const memoOf = e => isSx(e) ? e.memo : catOf(e)?.memo;
+const txPill = (e, tag = 'button') => `<${tag} class="pill ${isSx(e) ? 'sx' : ''}" ${tag === 'button' ? `data-act="pill" data-id="${e.id}"` : ''}>${esc(txLabel(e))}${memoOf(e) ? ' <i>ⓘ</i>' : ''}</${tag}>`;
+const findItem = id => db.entries.find(e => e.id === id) || db.surgeries.find(e => e.id === id);
 
 let tab = 'today';
 let date = todayStr();
@@ -74,6 +78,11 @@ function entriesOn(d) {
     .filter(e => patient(e.pid) && (e.daily ? e.date <= d : e.date === d))
     .sort((a, b) => tmin(a.time) - tmin(b.time) || roomNo(a) - roomNo(b));
 }
+/* 오늘 화면용: 치료 + 수술을 시간순으로 합친 목록 */
+function itemsOn(d) {
+  return [...entriesOn(d), ...surgeriesOn(d)].sort((a, b) => tmin(a.time) - tmin(b.time) || roomNo(a) - roomNo(b));
+}
+const surgeriesOn = d => db.surgeries.filter(s => patient(s.pid) && s.date === d).sort((a, b) => tmin(a.time) - tmin(b.time));
 const roomNo = e => patient(e.pid)?.room ?? 99;
 const stKey = (e, d) => `${e.id}|${d}`;
 const stOf = (e, d) => db.status[stKey(e, d)] || 0;   // 0 대기, 1 모시러 감/이동 중, 2 완료
@@ -82,9 +91,9 @@ function setSt(e, d, v) { if (v) db.status[stKey(e, d)] = v; else delete db.stat
 /* ================= 렌더 ================= */
 function render() {
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
-  $('#fab').classList.toggle('hide', tab === 'settings');
-  $('#fab').setAttribute('aria-label', tab === 'today' ? '일정 추가' : tab === 'patients' ? '환자 추가' : '환자 추가');
-  ({ today: renderToday, rooms: renderRooms, patients: renderPatients, settings: renderSettings })[tab]();
+  $('#fab').classList.toggle('hide', tab === 'settings' || tab === 'today');
+  $('#fab').setAttribute('aria-label', { tx: '치료 일정 추가', sx: '수술 일정 추가', rooms: '환자 추가' }[tab] || '추가');
+  ({ today: renderToday, tx: renderTx, sx: renderSx, rooms: renderRooms, settings: renderSettings })[tab]();
 }
 
 function mobBadge(k) { return `<span class="badge ${k}">${MOB[k].label}</span>`; }
@@ -95,7 +104,7 @@ function roomBox(p) {
 
 function renderToday() {
   const isToday = date === todayStr();
-  const list = entriesOn(date);
+  const list = itemsOn(date);
   const total = list.length;
   const done = list.filter(e => stOf(e, date) === 2).length;
   const esc_ = list.filter(e => MOB[mobOf(e)].escort && stOf(e, date) !== 2).length;
@@ -127,7 +136,7 @@ function renderToday() {
 
   if (!total) {
     html += `<div class="empty-msg">이 날짜에 일정이 없습니다.<br>
-      <button class="btn pri" data-act="addEntry">＋ 일정 추가</button>
+      <button class="btn pri" data-tab="tx">치료일정에서 입력하기</button>
       ${db.patients.length ? '' : '<br><button class="btn" data-act="demo">예시 데이터 불러오기</button>'}</div>`;
   } else {
     const times = [...new Set(list.map(e => e.time))];
@@ -152,15 +161,15 @@ function hero(e) {
   const dur = n => n >= 60 ? `${Math.floor(n / 60)}시간${n % 60 ? ' ' + n % 60 + '분' : ''}` : `${n}분`;
   const when = diff > 0 ? `${dur(diff)} 후` : diff === 0 ? '지금' : `${dur(-diff)} 지남`;
   return `<div class="hero">
-    <div class="lab">${st === 1 ? '이송 중' : '다음 일정'} · ${when}</div>
+    <div class="lab">${isSx(e) ? '수술 · ' : ''}${st === 1 ? '이송 중' : '다음 일정'} · ${when}</div>
     <div class="big"><span class="t">${e.time}</span><span class="rm">${p.room}호</span><span class="nm">${esc(p.name)}</span></div>
     <div class="meta">${esc(txLabel(e))} · ${m.label}${p.note ? ' · ' + esc(p.note) : ''}</div>
     <div class="mini"><button class="go" data-act="adv" data-id="${e.id}">${advLabel(m, st)}</button></div>
   </div>`;
 }
 function advLabel(m, st) {
-  if (m.escort) return st === 0 ? '🚶 모시러 감' : '✅ 치료 완료·귀실';
-  return '✅ 잘 갔는지 확인 완료';
+  if (m.escort) return st === 0 ? '🚶 이송 완료' : '↩ 복귀 완료';
+  return '✅ 잘 갔는지 확인';
 }
 
 function card(e, late) {
@@ -170,10 +179,9 @@ function card(e, late) {
   else {
     const cls = m.escort ? (st === 0 ? 'esc ' + (mk === 'bed' ? 'b' : '') : 'fin') : 'fin';
     btns = `<button class="${cls}" data-act="adv" data-id="${e.id}">${advLabel(m, st)}</button>
-      ${st === 1 ? `<button class="alt" data-act="undo" data-id="${e.id}">취소</button>` : ''}
-      <button class="alt" data-act="editEntry" data-id="${e.id}" aria-label="수정">✎</button>`;
+      ${st === 1 ? `<button class="alt" data-act="undo" data-id="${e.id}">취소</button>` : ''}`;
   }
-  const badge = st === 2 ? '<span class="badge st">완료</span>' : st === 1 ? '<span class="badge go">이송 중</span>' : '';
+  const badge = (isSx(e) ? '<span class="badge sx">수술</span>' : '') + (st === 2 ? `<span class="badge st">${m.escort ? '복귀 완료' : '확인 완료'}</span>` : st === 1 ? '<span class="badge go">이송됨 · 복귀 대기</span>' : '');
   return `<article class="card ${mk} ${st === 2 ? 'done' : ''} ${late ? 'late' : ''}">
     ${roomBox(p)}
     <div class="who"><span class="n">${esc(p.name)}</span>${mobBadge(mk)}${badge}</div>
@@ -198,15 +206,40 @@ function renderRooms() {
     <div class="sec">특실 (12~19호)</div><div class="rgrid">${ROOMS.filter(r => r.vip).map(card_).join('')}</div>`;
 }
 
-function renderPatients() {
-  $('#top').innerHTML = `<div class="hrow"><h1>환자</h1></div><div class="sum"><span>총 <b>${db.patients.length}</b>명</span></div>`;
-  const ps = [...db.patients].sort((a, b) => a.room - b.room || a.name.localeCompare(b.name, 'ko'));
-  $('#view').innerHTML = ps.length ? ps.map(p => `
-    <button class="pl" data-act="editPatient" data-id="${p.id}">${roomBox(p)}
-      <div><div class="who"><span class="n">${esc(p.name)}</span></div>
-      <div class="note">${db.entries.filter(e => e.pid === p.id).length}개 일정${p.note ? ' · ' + esc(p.note) : ''}</div></div></button>`).join('')
-    : `<div class="empty-msg">등록된 환자가 없습니다.<br><button class="btn pri" data-act="addPatient">＋ 환자 추가</button>
-       <br><button class="btn" data-act="demo">예시 데이터 불러오기</button></div>`;
+function dateHdr(title, sum) {
+  $('#top').innerHTML = `<div class="hrow"><h1>${title} · ${fmtDate(date)}</h1>
+    <div class="datenav"><button data-act="day" data-n="-1" aria-label="전날">‹</button>
+    <button class="dl" data-act="day" data-n="0">오늘</button>
+    <button data-act="day" data-n="1" aria-label="다음날">›</button></div></div>
+    <div class="sum">${sum}</div>`;
+}
+/* 입력/편집용 목록 행 (체크 버튼 없음, 누르면 수정) */
+function editRows(list, act) {
+  let html = '';
+  for (const t of [...new Set(list.map(e => e.time))]) {
+    html += `<section class="grp"><div class="gh"><span class="gt">${t}</span><span class="gc">${list.filter(e => e.time === t).length}명</span></div>
+      ${list.filter(e => e.time === t).map(e => {
+        const p = patient(e.pid);
+        return `<button class="pl row-edit" data-act="${act}" data-id="${e.id}">${roomBox(p)}
+          <div><div class="who"><span class="n">${esc(p.name)}</span>${mobBadge(mobOf(e))}</div>
+          <div>${txPill(e, 'span')}${e.daily ? ' <span class="note">· 매일</span>' : ''}</div>
+          ${e.memo ? `<div class="note">${esc(e.memo)}</div>` : ''}</div></button>`;
+      }).join('')}</section>`;
+  }
+  return html;
+}
+function renderTx() {
+  const list = entriesOn(date);
+  dateHdr('치료일정', `<span>${list.length}건</span><span>＋ 버튼으로 추가 · 항목을 눌러 수정</span>`);
+  $('#view').innerHTML = list.length ? editRows(list, 'editEntry')
+    : `<div class="empty-msg">이 날짜의 치료 일정이 없습니다.<br><button class="btn pri" data-act="addEntry">＋ 치료 일정 추가</button></div>`;
+}
+function renderSx() {
+  const list = surgeriesOn(date);
+  const up = db.surgeries.filter(s => patient(s.pid) && s.date > date).length;
+  dateHdr('수술일정', `<span>${list.length}건</span>${up ? `<span>이후 예정 ${up}건</span>` : ''}`);
+  $('#view').innerHTML = list.length ? editRows(list, 'editEntry')
+    : `<div class="empty-msg">이 날짜의 수술 일정이 없습니다.<br><button class="btn pri" data-act="addSx">＋ 수술 일정 추가</button></div>`;
 }
 
 function renderSettings() {
@@ -300,7 +333,10 @@ function entryForm(e, presetPid) {
     <div class="f"><label>이동 방식</label><div class="seg">
       ${Object.entries(MOB).map(([k, v]) => `<label><input type="radio" name="mob" value="${k}" ${mobOf(e) === k ? 'checked' : ''}><span class="${k}">${v.label}</span></label>`).join('')}
     </div></div>
-    <div class="f"><label>시간</label><input type="time" name="time" value="${e.time}" required></div>
+    <div class="row">
+      <div class="f"><label>날짜${e.daily ? ' (시작일)' : ''}</label><input type="date" name="date" value="${e.date || date}" required></div>
+      <div class="f"><label>시간</label><input type="time" name="time" value="${e.time}" required></div>
+    </div>
     <div class="f"><label>치료</label><div class="catpick">
       ${db.cats.map(c => `<label><input type="radio" name="tid" value="${c.id}" ${c.id === e.tid ? 'checked' : ''}><span>${esc(c.label)}</span></label>`).join('')}
     </div></div>
@@ -318,9 +354,9 @@ function entryForm(e, presetPid) {
   $('#ef').onsubmit = ev => {
     ev.preventDefault();
     const f = new FormData(ev.target);
-    const data = { pid: f.get('pid'), time: f.get('time'), tid: f.get('tid'), mob: f.get('mob'), memo: f.get('memo').trim(), daily: f.get('daily') === 'on' };
-    if (isNew) db.entries.push({ id: uid(), date, ...data }); else Object.assign(e, data);
-    save(); closeSheet(); render();
+    const data = { pid: f.get('pid'), date: f.get('date'), time: f.get('time'), tid: f.get('tid'), mob: f.get('mob'), memo: f.get('memo').trim(), daily: f.get('daily') === 'on' };
+    if (isNew) db.entries.push({ id: uid(), ...data }); else Object.assign(e, data);
+    date = data.date; save(); closeSheet(); render();
   };
 }
 function catForm(c) {
@@ -343,11 +379,42 @@ function catForm(c) {
     save(); closeSheet(); render();
   };
 }
+function sxForm(e, presetPid) {
+  if (!db.patients.length) { toast('먼저 환자를 추가하세요', ''); patientForm(); return; }
+  const isNew = !e;
+  e = e || { kind: 'sx', pid: presetPid || db.patients[0].id, date, time: '08:00', name: '', mob: 'bed', memo: '' };
+  const ps = [...db.patients].sort((a, b) => a.room - b.room);
+  openSheet(`<h2>${isNew ? '수술 일정 추가' : '수술 일정 수정'}</h2>
+  <form id="sf">
+    <div class="f"><label>환자</label><select name="pid">${ps.map(p => `<option value="${p.id}" ${p.id === e.pid ? 'selected' : ''}>${p.room}호 ${esc(p.name)}</option>`).join('')}</select></div>
+    <div class="row">
+      <div class="f"><label>날짜</label><input type="date" name="date" value="${e.date}" required></div>
+      <div class="f"><label>시간</label><input type="time" name="time" value="${e.time}" required></div>
+    </div>
+    <div class="f"><label>수술명</label><input name="name" value="${esc(e.name)}" required autocomplete="off" placeholder="예: 무릎 인공관절"></div>
+    <div class="f"><label>이동 방식</label><div class="seg">
+      ${Object.entries(MOB).map(([k, v]) => `<label><input type="radio" name="mob" value="${k}" ${mobOf(e) === k ? 'checked' : ''}><span class="${k}">${v.label}</span></label>`).join('')}
+    </div></div>
+    <div class="f"><label>안내 메모 (필을 누르면 표시)</label><textarea name="memo" rows="3" placeholder="예: 금식, 수술실 3번, 보호자 동행">${esc(e.memo)}</textarea></div>
+    <div class="acts">
+      ${isNew ? '' : '<button type="button" class="danger" data-act="delSx">삭제</button>'}
+      <button type="button" data-act="close">취소</button>
+      <button class="pri">저장</button></div>
+  </form>`);
+  sheet.dataset.eid = e.id || '';
+  $('#sf').onsubmit = ev => {
+    ev.preventDefault();
+    const f = new FormData(ev.target);
+    const data = { kind: 'sx', pid: f.get('pid'), date: f.get('date'), time: f.get('time'), name: f.get('name').trim(), mob: f.get('mob'), memo: f.get('memo').trim() };
+    if (isNew) db.surgeries.push({ id: uid(), ...data }); else Object.assign(e, data);
+    date = data.date; save(); closeSheet(); render();
+  };
+}
 function pillSheet(e) {
-  const c = catOf(e);
+  const c = catOf(e), memo = memoOf(e);
   openSheet(`<h2>${esc(txLabel(e))}</h2>
-    ${c?.memo ? `<p style="font-size:20px;line-height:1.5;margin:0 0 8px;white-space:pre-wrap">${esc(c.memo)}</p>` : '<p class="note">상세 메모가 없습니다. 설정에서 추가할 수 있습니다.</p>'}
-    ${e.memo ? `<p class="note">일정 메모: ${esc(e.memo)}</p>` : ''}
+    ${memo ? `<p style="font-size:20px;line-height:1.5;margin:0 0 8px;white-space:pre-wrap">${esc(memo)}</p>` : `<p class="note">상세 메모가 없습니다. ${isSx(e) ? '수술일정에서' : '설정에서'} 추가할 수 있습니다.</p>`}
+    ${!isSx(e) && e.memo ? `<p class="note">일정 메모: ${esc(e.memo)}</p>` : ''}
     <div class="acts"><button data-act="close">닫기</button>${c ? `<button data-act="editCat" data-id="${c.id}">메모 수정</button>` : ''}</div>`);
 }
 function nextSlot() { // 현재 시각 이후 가장 가까운 30분 단위
@@ -370,14 +437,20 @@ document.addEventListener('click', ev => {
   if (!t) return;
   if (t.dataset.tab) { tab = t.dataset.tab; render(); scrollTo(0, 0); return; }
   const id = t.dataset.id, act = t.dataset.act;
-  const entry = () => db.entries.find(e => e.id === id);
+  const entry = () => findItem(id);
   switch (act) {
     case 'day': date = Number(t.dataset.n) === 0 ? todayStr() : addDays(date, Number(t.dataset.n)); render(); break;
     case 'addEntry': entryForm(); break;
     case 'addPatient': patientForm(); break;
     case 'addPatientTo': patientForm(null, Number(t.dataset.no)); break;
     case 'editPatient': patientForm(patient(id)); break;
-    case 'editEntry': entryForm(entry()); break;
+    case 'editEntry': { const x = entry(); isSx(x) ? sxForm(x) : entryForm(x); break; }
+    case 'addSx': sxForm(); break;
+    case 'delSx': {
+      const eid = sheet.dataset.eid;
+      if (confirm('이 수술 일정을 삭제할까요?')) { db.surgeries = db.surgeries.filter(x => x.id !== eid); save(); closeSheet(); render(); }
+      break;
+    }
     case 'room': roomSheet(Number(t.dataset.no)); break;
     case 'close': closeSheet(); break;
     case 'pill': pillSheet(entry()); break;
@@ -403,7 +476,7 @@ document.addEventListener('click', ev => {
     case 'delPatient': {
       const pid = sheet.dataset.pid, p = patient(pid);
       if (confirm(`${p.name} 환자를 퇴원 처리하고 일정도 모두 삭제할까요?`)) {
-        db.patients = db.patients.filter(x => x.id !== pid); db.entries = db.entries.filter(e => e.pid !== pid);
+        db.patients = db.patients.filter(x => x.id !== pid); db.entries = db.entries.filter(e => e.pid !== pid); db.surgeries = db.surgeries.filter(x => x.pid !== pid);
         save(); closeSheet(); render();
       }
       break;
@@ -414,12 +487,12 @@ document.addEventListener('click', ev => {
     case 'import': $('#file').click(); break;
     case 'demo': demo(); break;
     case 'wipe':
-      if (confirm('모든 환자·일정 데이터를 삭제합니다. 되돌릴 수 없습니다.')) { db = { ...db, patients: [], entries: [], status: {} }; save(); render(); }
+      if (confirm('모든 환자·일정 데이터를 삭제합니다. 되돌릴 수 없습니다.')) { db = { ...db, patients: [], entries: [], surgeries: [], status: {} }; save(); render(); }
       break;
     case 'toastGo': t.closest('.toast').remove(); tab = 'today'; date = todayStr(); render(); break;
   }
 });
-$('#fab').onclick = () => (tab === 'patients' || tab === 'rooms') ? patientForm() : entryForm();
+$('#fab').onclick = () => tab === 'rooms' ? patientForm() : tab === 'sx' ? sxForm() : entryForm();
 
 /* ================= 내보내기/가져오기 ================= */
 function download(name, type, text) {
@@ -433,18 +506,18 @@ function importFile(ev) {
     const d = JSON.parse(txt);
     if (!Array.isArray(d.patients) || !Array.isArray(d.entries)) throw 0;
     if (!confirm('현재 데이터를 백업 파일로 덮어쓸까요?')) return;
-    db = migrate({ status: {}, settings: { lead: 10 }, cats: [], ...d }); save(); render(); toast('불러오기 완료', '');
+    db = migrate({ status: {}, settings: { lead: 10 }, cats: [], surgeries: [], ...d }); save(); render(); toast('불러오기 완료', '');
   }).catch(() => toast('불러오기 실패', '올바른 백업 파일이 아닙니다'));
 }
 function exportIcs() {
   const ics = s => s.replace(/[\\;,]/g, m => '\\' + m).replace(/\n/g, '\\n');
   const d0 = date.replace(/-/g, '');
-  const ev = entriesOn(date).map(e => {
+  const ev = itemsOn(date).map(e => {
     const p = patient(e.pid), [h, m] = e.time.split(':');
     const end = tmin(e.time) + 30;
     return ['BEGIN:VEVENT', `UID:${e.id}-${d0}@ward-schedule`, `DTSTAMP:${d0}T000000`,
       `DTSTART:${d0}T${h}${m}00`, `DTEND:${d0}T${pad(Math.floor(end / 60) % 24)}${pad(end % 60)}00`,
-      `SUMMARY:${ics(`${p.room}호 ${p.name} ${txLabel(e)} (${MOB[mobOf(e)].label})`)}`, `DESCRIPTION:${ics(catOf(e)?.memo || '')}`,
+      `SUMMARY:${ics(`${p.room}호 ${p.name} ${txLabel(e)} (${MOB[mobOf(e)].label})`)}`, `DESCRIPTION:${ics(memoOf(e) || '')}`,
       'BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:치료 이송', `TRIGGER:-PT${db.settings.lead}M`, 'END:VALARM', 'END:VEVENT'].join('\r\n');
   });
   if (!ev.length) return toast('내보낼 일정이 없습니다', '');
@@ -461,7 +534,7 @@ function toast(title, sub, go) {
 }
 function tick() {
   const d = todayStr(), now = nowMin(), lead = db.settings.lead;
-  for (const e of entriesOn(d)) {
+  for (const e of itemsOn(d)) {
     if (stOf(e, d) !== 0) continue;
     const k = stKey(e, d);
     if (fired.has(k) || now < tmin(e.time) - lead || now > tmin(e.time) + 30) continue;
@@ -491,6 +564,7 @@ function demo() {
   [[a, '09:00', pt, 'walk'], [b, '09:00', pt, 'wheel'], [c, '09:30', ex, 'bed'], [d, '09:30', pt, 'walk'],
     [e, '10:00', ot, 'wheel'], [f, '10:30', pt, 'walk'], [g, '10:30', xr, 'bed', false], [h, '11:00', ex, 'wheel'],
     [i, '11:00', pt, 'walk'], [a, '14:00', ot, 'walk'], [c, '15:00', pt, 'bed']].forEach(x => E(...x));
+  db.surgeries.push({ id: uid(), kind: 'sx', pid: c, date, time: '13:00', name: '무릎 인공관절', mob: 'bed', memo: '금식 확인, 수술실 3번' });
   save(); render(); toast('예시 데이터를 불러왔습니다', '');
 }
 
