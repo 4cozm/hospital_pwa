@@ -13,7 +13,6 @@ const MOB = {
   bed:   { label: '베드',   escort: true },
 };
 const KEY = 'ward-schedule-v1';
-const NEW_CAT = '__new__';
 
 /* ================= 저장소 (localStorage 전용) ================= */
 function uid() { return Math.random().toString(36).slice(2, 10); }
@@ -41,6 +40,12 @@ function migrate(d) {
     delete e.tx;
   }
   d.patients.forEach(p => delete p.mob);
+  for (const p of d.patients) {           // v3: 병실 내 자리 번호(bed). 없으면 빈 번호부터 순서대로
+    if (p.bed) continue;
+    const used = new Set(d.patients.filter(x => x.room === p.room && x.bed).map(x => x.bed));
+    let b = 1; while (used.has(b)) b++;
+    p.bed = b;
+  }
   return d;
 }
 function save() {
@@ -62,6 +67,8 @@ const fmtDate = s => {
   return `${d.getMonth() + 1}/${d.getDate()} (${'일월화수목금토'[d.getDay()]})`;
 };
 const patient = id => db.patients.find(p => p.id === id);
+const patientAt = (room, bed, exceptId) => db.patients.find(p => p.room === room && p.bed === bed && p.id !== exceptId);
+const bedLabel = p => (roomOf(p.room)?.cap > 1 && p.bed ? `${p.bed}번` : '');
 const mobOf = e => (MOB[e.mob] ? e.mob : 'walk');
 const isSx = e => e.kind === 'sx';
 const catOf = e => isSx(e) ? null : db.cats.find(c => c.id === e.tid);
@@ -100,7 +107,7 @@ function render() {
 function mobBadge(k) { return `<span class="badge ${k}">${MOB[k].label}</span>`; }
 function roomBox(p) {
   const r = roomOf(p.room);
-  return `<div class="room ${r?.vip ? 'vip' : ''}"><b>${p.room}</b><small>호${r?.vip ? ' 특' : ''}</small></div>`;
+  return `<div class="room ${r?.vip ? 'vip' : ''}"><b>${p.room}</b><small>호${r?.vip ? ' 특' : ''}${bedLabel(p) ? ' · ' + bedLabel(p) : ''}</small></div>`;
 }
 
 function renderToday() {
@@ -164,7 +171,7 @@ function hero(e) {
   return `<div class="hero">
     <div class="lab">${isSx(e) ? '수술 · ' : ''}${st === 1 ? '이송 중' : '다음 일정'} · ${when}</div>
     <div class="big"><span class="t">${e.time}</span><span class="rm">${p.room}호</span><span class="nm">${esc(p.name)}</span></div>
-    <div class="meta">${esc(txLabel(e))} · ${m.label}${p.note ? ' · ' + esc(p.note) : ''}</div>
+    <div class="meta">${bedLabel(p) ? bedLabel(p) + ' · ' : ''}${esc(txLabel(e))} · ${m.label}${p.note ? ' · ' + esc(p.note) : ''}</div>
     <div class="mini"><button class="go" data-act="adv" data-id="${e.id}">${advLabel(m, st)}</button></div>
   </div>`;
 }
@@ -196,10 +203,10 @@ function renderRooms() {
   $('#top').innerHTML = `<div class="hrow"><h1>병실 현황</h1></div>
     <div class="sum"><span>입원 <b>${db.patients.length}</b>명</span></div>`;
   const card_ = r => {
-    const ps = db.patients.filter(p => p.room === r.no);
-    const slots = Array.from({ length: r.cap }, (_, i) => ps[i]
-      ? `<div class="slot">${esc(ps[i].name)}</div>`
-      : `<div class="slot empty">＋ 빈 자리</div>`).join('');
+    const slots = Array.from({ length: r.cap }, (_, i) => {
+      const pa = patientAt(r.no, i + 1), bn = r.cap > 1 ? `<span class="bn">${i + 1}</span>` : '';
+      return pa ? `<div class="slot">${bn}${esc(pa.name)}</div>` : `<div class="slot empty">${bn}빈 자리</div>`;
+    }).join('');
     return `<button class="rc ${r.vip ? 'vip' : ''}" data-act="room" data-no="${r.no}">
       <div class="rh"><b>${r.no}호</b><span>${r.code} · ${r.vip ? '특실' : '일반'} ${r.cap}인</span></div>${slots}</button>`;
   };
@@ -230,10 +237,11 @@ function editRows(list, act) {
   return html;
 }
 function renderTx() {
-  const list = entriesOn(date);
-  dateHdr('치료일정', `<span>${list.length}건</span><span>＋ 버튼으로 추가 · 항목을 눌러 수정</span>`);
+  const today = todayStr(), list = entriesOn(today);
+  $('#top').innerHTML = `<div class="hrow"><h1>치료일정 · 오늘 ${fmtDate(today)}</h1></div>
+    <div class="sum"><span>${list.length}건</span><span>＋ 버튼으로 추가 · 항목을 눌러 수정</span></div>`;
   $('#view').innerHTML = list.length ? editRows(list, 'editEntry')
-    : `<div class="empty-msg">이 날짜의 치료 일정이 없습니다.<br><button class="btn pri" data-act="addEntry">＋ 치료 일정 추가</button></div>`;
+    : `<div class="empty-msg">오늘 치료 일정이 없습니다.<br><button class="btn pri" data-act="addEntry">＋ 치료 일정 추가</button></div>`;
 }
 function renderSx() {
   const list = surgeriesOn(date);
@@ -247,10 +255,11 @@ function renderSettings() {
   $('#top').innerHTML = `<div class="hrow"><h1>설정</h1></div>`;
   const perm = 'Notification' in window ? Notification.permission : 'unsupported';
   $('#view').innerHTML = `
-  <div class="set"><h3>치료 종류</h3>
-    <p>일정 입력 때 이 목록에서 고르고, 일정에는 필로 표시됩니다. 필을 누르면 메모가 나옵니다.</p>
-    <div class="chips" style="margin:8px 0">${db.cats.map(c => `<button class="pill" data-act="editCat" data-id="${c.id}">${esc(c.label)}${c.memo ? ' <i>ⓘ</i>' : ''}</button>`).join('') || '<span class="note">아직 없음</span>'}</div>
-    <button class="btn pri" data-act="addCat">＋ 치료 종류 추가</button></div>
+  <div class="set"><h3>치료 시술</h3>
+    <p>치료일정에서는 여기에 등록한 시술만 선택할 수 있습니다. 시술 이름과 장소 메모를 미리 써두세요. 누르면 수정·삭제합니다.</p>
+    ${db.cats.map(c => `<button class="pl" data-act="editCat" data-id="${c.id}"><div><div class="who"><span class="pill">${esc(c.label)}</span></div>
+      <div class="note" style="margin-top:4px">${c.memo ? esc(c.memo) : '장소 메모 없음'}</div></div></button>`).join('') || '<p class="note">아직 등록된 시술이 없습니다.</p>'}
+    <button class="btn pri" data-act="addCat">＋ 시술 추가</button></div>
   <div class="set"><h3>알림</h3>
     <div class="f"><label>치료 몇 분 전에 알릴까요</label>
       <select id="lead">${[0, 5, 10, 15, 20, 30].map(n => `<option value="${n}" ${db.settings.lead === n ? 'selected' : ''}>${n ? n + '분 전' : '정각'}</option>`).join('')}</select></div>
@@ -280,33 +289,53 @@ function closeSheet() { if (sheet.open) sheet.close(); }
 sheet.addEventListener('click', e => { if (e.target === sheet) closeSheet(); });
 
 function roomOptions(sel) {
-  return ROOMS.map(r => {
+  const opts = ROOMS.map(r => {
     const n = db.patients.filter(p => p.room === r.no).length;
-    return `<option value="${r.no}" ${sel === r.no ? 'selected' : ''}>${r.no}호 (${r.code}) ${n}/${r.cap}${r.vip ? ' 특실' : ''}</option>`;
+    const full = n >= r.cap && r.no !== sel;
+    return `<option value="${r.no}" ${sel === r.no ? 'selected' : ''} ${full ? 'disabled' : ''}>${r.no}호 ${n}/${r.cap}${r.vip ? ' 특실' : ''}${full ? ' (만실)' : ''}</option>`;
   }).join('');
+  return (sel ? '' : '<option value="">병실을 선택하세요</option>') + opts;
+}
+/* 자리 번호: 사용 중인 자리는 누가 쓰는지 보여주되 선택 불가 */
+function bedOptions(room, selfId, sel) {
+  const r = roomOf(room);
+  if (!r) return '<select name="bed" disabled><option>병실을 먼저 선택하세요</option></select>';
+  if (r.cap === 1) return '<input type="hidden" name="bed" value="1"><div class="note">1인실</div>';
+  const opts = Array.from({ length: r.cap }, (_, i) => {
+    const b = i + 1, o = patientAt(room, b, selfId);
+    return `<option value="${b}" ${sel === b ? 'selected' : ''} ${o ? 'disabled' : ''}>${b}번${o ? ` — ${esc(o.name)} (사용 중)` : ''}</option>`;
+  }).join('');
+  return `<select name="bed" required>${sel ? '' : '<option value="">자리 번호를 선택하세요</option>'}${opts}</select>`;
 }
 
-function patientForm(p, presetRoom) {
+function patientForm(p, presetRoom, presetBed) {
   const isNew = !p;
-  p = p || { name: '', room: presetRoom || 1, note: '' };
+  p = p || { name: '', room: presetRoom || null, bed: presetBed || null, note: '' };
   openSheet(`<h2>${isNew ? '환자 추가' : '환자 수정'}</h2>
   <form id="pf">
     <div class="f"><label>이름</label><input name="name" value="${esc(p.name)}" required autocomplete="off"></div>
-    <div class="f"><label>병실</label><select name="room">${roomOptions(p.room)}</select></div>
+    <div class="row">
+      <div class="f"><label>병실</label><select name="room" required>${roomOptions(p.room)}</select></div>
+      <div class="f"><label>자리 번호</label><div id="bedwrap">${bedOptions(p.room, p.id, p.bed)}</div></div>
+    </div>
     <div class="f"><label>메모 (선택)</label><input name="note" value="${esc(p.note)}" placeholder="예: 왼쪽 어깨 주의, 보호자 동행" autocomplete="off"></div>
     <div class="acts">
       ${isNew ? '' : '<button type="button" class="danger" data-act="delPatient">퇴원</button>'}
       <button type="button" data-act="close">취소</button>
       <button class="pri">저장</button></div>
   </form>`);
+  $('#pf [name=room]').onchange = ev => {    // 병실을 바꾸면 자리 번호를 다시 고르게 함
+    const room = Number(ev.target.value) || null;
+    $('#bedwrap').innerHTML = bedOptions(room, p.id, room === p.room ? p.bed : null);
+  };
   $('#pf').onsubmit = ev => {
     ev.preventDefault();
     const f = new FormData(ev.target);
-    const room = Number(f.get('room'));
-    const r = roomOf(room);
-    const occ = db.patients.filter(x => x.room === room && x.id !== p.id).length;
-    if (occ >= r.cap && !confirm(`${room}호는 정원 ${r.cap}명이 이미 찼습니다. 그래도 배정할까요?`)) return;
-    const data = { name: f.get('name').trim(), room, note: f.get('note').trim() };
+    const room = Number(f.get('room')), bed = Number(f.get('bed'));
+    if (!roomOf(room) || !bed) return toast('병실과 자리 번호를 선택하세요', '');
+    const other = patientAt(room, bed, p.id);
+    if (other) return toast(`${room}호 ${bed}번은 ${other.name} 님이 사용 중입니다`, '');
+    const data = { name: f.get('name').trim(), room, bed, note: f.get('note').trim() };
     if (isNew) db.patients.push({ id: uid(), ...data }); else Object.assign(p, data);
     save(); closeSheet(); render();
   };
@@ -318,10 +347,35 @@ function noPatientSheet() {
     <p class="note">일정은 병실에 등록된 환자에게만 추가할 수 있습니다. 병실 탭에서 환자를 먼저 배정하세요.</p>
     <div class="acts"><button data-act="close">닫기</button><button class="pri" data-act="goRooms">병실로 이동</button></div>`);
 }
-/* 환자 선택: 기본값 없이 비워 두어 엉뚱한 환자에 저장되는 실수를 막는다 */
-function patientSelect(sel, blank) {
-  const ps = [...db.patients].sort((a, b) => a.room - b.room || a.name.localeCompare(b.name, 'ko'));
-  return `<select name="pid" required>${blank ? '<option value="">환자를 선택하세요</option>' : ''}${ps.map(p => `<option value="${p.id}" ${p.id === sel ? 'selected' : ''}>${p.room}호 ${esc(p.name)}</option>`).join('')}</select>`;
+/* 환자 선택: 호수 → 그 병실의 환자 (기본값 없음, 목록이 길어지지 않게 2단계) */
+function patientOptions(room, sel) {
+  if (!room) return '<select name="pid" disabled><option>호수를 먼저 선택하세요</option></select>';
+  const ps = db.patients.filter(p => p.room === room).sort((a, b) => a.bed - b.bed);
+  const auto = ps.length === 1 && roomOf(room).cap === 1;     // 1인실은 환자가 한 명뿐이라 자동 선택
+  return `<select name="pid" required>${sel || auto ? '' : '<option value="">환자 선택</option>'}${ps.map(p =>
+    `<option value="${p.id}" ${p.id === sel || auto ? 'selected' : ''}>${bedLabel(p) ? bedLabel(p) + ' ' : ''}${esc(p.name)}</option>`).join('')}</select>`;
+}
+function pickerHtml(selPid) {
+  const room = patient(selPid)?.room || null;
+  const rooms = ROOMS.filter(r => db.patients.some(p => p.room === r.no));
+  return `<div class="row">
+    <div class="f"><label>호수</label><select name="room" required>${room ? '' : '<option value="">호수 선택</option>'}${rooms.map(r =>
+      `<option value="${r.no}" ${r.no === room ? 'selected' : ''}>${r.no}호 (${db.patients.filter(p => p.room === r.no).length}명)</option>`).join('')}</select></div>
+    <div class="f"><label>환자</label><div id="ppwrap">${patientOptions(room, selPid)}</div></div></div>`;
+}
+function bindPicker(onPick) {
+  const bindPid = () => { const s = $('#sheet [name=pid]'); if (s) s.onchange = () => s.value && onPick?.(s.value); };
+  $('#sheet [name=room]').onchange = ev => {
+    $('#ppwrap').innerHTML = patientOptions(Number(ev.target.value) || null, null);
+    bindPid();
+    const s = $('#sheet [name=pid]'); if (s && s.value) onPick?.(s.value);   // 1인실 자동 선택 시
+  };
+  bindPid();
+}
+function noCatSheet() {
+  openSheet(`<h2>등록된 치료 시술이 없습니다</h2>
+    <p class="note">치료 일정은 설정에 등록한 시술만 선택할 수 있습니다. 설정에서 시술 이름과 장소 메모를 먼저 등록하세요.</p>
+    <div class="acts"><button data-act="close">닫기</button><button class="pri" data-act="goSettings">설정으로 이동</button></div>`);
 }
 function lastMob(pid) {
   const l = db.entries.filter(x => x.pid === pid).pop();
@@ -329,71 +383,49 @@ function lastMob(pid) {
 }
 function entryForm(e, presetPid) {
   if (!db.patients.length) return noPatientSheet();
+  if (!db.cats.length) return noCatSheet();
   const isNew = !e;
-  e = e || { pid: presetPid || '', time: nextSlot(), tid: db.cats.length ? '' : NEW_CAT, mob: presetPid ? lastMob(presetPid) : 'walk', daily: false, memo: '' };
-  openSheet(`<h2>${isNew ? '일정 추가' : '일정 수정'} · ${fmtDate(e.date || date)}</h2>
+  e = e || { pid: presetPid || '', time: nextSlot(), tid: '', mob: presetPid ? lastMob(presetPid) : 'walk', daily: false, memo: '' };
+  openSheet(`<h2>${isNew ? `치료 일정 추가 · 오늘 ${fmtDate(todayStr())}` : '치료 일정 수정'}</h2>
   <form id="ef">
-    <div class="f"><label>환자 (병실에 등록된 환자만)</label>${patientSelect(e.pid, isNew && !e.pid)}</div>
+    ${pickerHtml(e.pid)}
+    <div class="f"><label>치료 시술</label>
+      <select name="tid" required>
+        ${e.tid ? '' : '<option value="">시술을 선택하세요</option>'}
+        ${db.cats.map(c => `<option value="${c.id}" ${c.id === e.tid ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}
+      </select></div>
     <div class="f"><label>이동 방식</label><div class="seg">
       ${Object.entries(MOB).map(([k, v]) => `<label><input type="radio" name="mob" value="${k}" ${mobOf(e) === k ? 'checked' : ''}><span class="${k}">${v.label}</span></label>`).join('')}
     </div></div>
-    <div class="row">
-      <div class="f"><label>날짜${e.daily ? ' (시작일)' : ''}</label><input type="date" name="date" value="${e.date || date}" required></div>
-      <div class="f"><label>시간</label><input type="time" name="time" value="${e.time}" required></div>
-    </div>
-    <div class="f"><label>치료 (시술)</label>
-      <select name="tid" required>
-        ${isNew && !e.tid ? '<option value="">치료를 선택하세요</option>' : ''}
-        ${db.cats.map(c => `<option value="${c.id}" ${c.id === e.tid ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}
-        <option value="${NEW_CAT}" ${e.tid === NEW_CAT ? 'selected' : ''}>＋ 새 치료 종류 추가…</option>
-      </select>
-      <div id="newcat" class="newcat" ${e.tid === NEW_CAT ? '' : 'hidden'}>
-        <input name="ncl" placeholder="표시 이름 (예: 3층 PT)" autocomplete="off">
-        <input name="ncm" placeholder="상세 메모 (예: 3층 쭉 들어가서 좌측)" autocomplete="off">
-      </div>
-    </div>
+    <div class="f"><label>시간</label><input type="time" name="time" value="${e.time}" required></div>
     <div class="f"><label>일정 메모 (선택)</label><input name="memo" value="${esc(e.memo)}" autocomplete="off"></div>
-    <div class="f"><label class="chk"><input type="checkbox" name="daily" ${e.daily ? 'checked' : ''}> 이 날짜부터 매일 반복</label></div>
+    <div class="f"><label class="chk"><input type="checkbox" name="daily" ${e.daily ? 'checked' : ''}> 매일 반복</label></div>
     <div class="acts">
       ${isNew ? '' : '<button type="button" class="danger" data-act="delEntry">삭제</button>'}
       <button type="button" data-act="close">취소</button>
       <button class="pri">저장</button></div>
   </form>`);
   sheet.dataset.eid = e.id || '';
-  if (isNew) $('#ef [name=pid]').onchange = ev => {   // 환자를 바꾸면 그 환자의 지난 이동 방식을 기본값으로
-    if (!ev.target.value) return;
-    const r = $(`#ef [name=mob][value=${lastMob(ev.target.value)}]`); if (r) r.checked = true;
-  };
-  const syncNew = () => {
-    const on = $('#ef [name=tid]').value === NEW_CAT;
-    $('#newcat').hidden = !on; $('#ef [name=ncl]').required = on;
-    if (on) $('#ef [name=ncl]').focus();
-  };
-  $('#ef [name=tid]').onchange = syncNew;
-  $('#ef [name=ncl]').required = e.tid === NEW_CAT;
+  bindPicker(isNew ? pid => {   // 환자를 고르면 그 환자의 지난 이동 방식을 기본값으로
+    const r = $(`#ef [name=mob][value=${lastMob(pid)}]`); if (r) r.checked = true;
+  } : null);
   $('#ef').onsubmit = ev => {
     ev.preventDefault();
     const f = new FormData(ev.target);
     if (!patient(f.get('pid'))) return toast('병실에 등록된 환자를 선택하세요', '');
-    let tid = f.get('tid');
-    if (tid === NEW_CAT) {   // 그 자리에서 새 치료 종류 생성 (같은 이름이 있으면 재사용)
-      const label = f.get('ncl').trim(); if (!label) return;
-      let c = db.cats.find(c => c.label === label);
-      if (!c) db.cats.push(c = { id: uid(), label, memo: f.get('ncm').trim() });
-      tid = c.id;
-    }
-    const data = { pid: f.get('pid'), date: f.get('date'), time: f.get('time'), tid, mob: f.get('mob'), memo: f.get('memo').trim(), daily: f.get('daily') === 'on' };
-    if (isNew) db.entries.push({ id: uid(), ...data }); else Object.assign(e, data);
-    date = data.date; save(); closeSheet(); render();
+    if (!db.cats.some(c => c.id === f.get('tid'))) return toast('등록된 치료 시술을 선택하세요', '');
+    const data = { pid: f.get('pid'), time: f.get('time'), tid: f.get('tid'), mob: f.get('mob'), memo: f.get('memo').trim(), daily: f.get('daily') === 'on' };
+    if (isNew) db.entries.push({ id: uid(), date: todayStr(), ...data }); else Object.assign(e, data);   // 날짜는 항상 오늘
+    save(); closeSheet(); render();
   };
 }
 function catForm(c) {
   const isNew = !c;
   c = c || { label: '', memo: '' };
-  openSheet(`<h2>${isNew ? '치료 종류 추가' : '치료 종류 수정'}</h2>
+  openSheet(`<h2>${isNew ? '치료 시술 추가' : '치료 시술 수정'}</h2>
   <form id="cf">
-    <div class="f"><label>표시 이름 (필에 보이는 글자)</label><input name="label" value="${esc(c.label)}" required autocomplete="off" placeholder="예: 3층 PT"></div>
-    <div class="f"><label>상세 메모 (필을 누르면 표시)</label><textarea name="memo" rows="3" placeholder="예: 3층 쭉 들어가서 좌측">${esc(c.memo)}</textarea></div>
+    <div class="f"><label>시술 이름 (일정에 필로 표시)</label><input name="label" value="${esc(c.label)}" required autocomplete="off" placeholder="예: 3층 PT"></div>
+    <div class="f"><label>장소 메모 (필을 누르면 표시)</label><textarea name="memo" rows="3" placeholder="예: 3층 쭉 들어가서 좌측">${esc(c.memo)}</textarea></div>
     <div class="acts">
       ${isNew ? '' : '<button type="button" class="danger" data-act="delCat">삭제</button>'}
       <button type="button" data-act="close">취소</button>
@@ -413,7 +445,7 @@ function sxForm(e, presetPid) {
   e = e || { kind: 'sx', pid: presetPid || '', date, time: '08:00', name: '', mob: 'bed', memo: '' };
   openSheet(`<h2>${isNew ? '수술 일정 추가' : '수술 일정 수정'}</h2>
   <form id="sf">
-    <div class="f"><label>환자 (병실에 등록된 환자만)</label>${patientSelect(e.pid, isNew && !e.pid)}</div>
+    ${pickerHtml(e.pid)}
     <div class="row">
       <div class="f"><label>날짜</label><input type="date" name="date" value="${e.date}" required></div>
       <div class="f"><label>시간</label><input type="time" name="time" value="${e.time}" required></div>
@@ -429,6 +461,7 @@ function sxForm(e, presetPid) {
       <button class="pri">저장</button></div>
   </form>`);
   sheet.dataset.eid = e.id || '';
+  bindPicker(isNew ? pid => { const r = $(`#sf [name=mob][value=${lastMob(pid)}]`); if (r) r.checked = true; } : null);
   $('#sf').onsubmit = ev => {
     ev.preventDefault();
     const f = new FormData(ev.target);
@@ -451,12 +484,15 @@ function nextSlot() { // 현재 시각 이후 가장 가까운 30분 단위
 }
 
 function roomSheet(no) {
-  const r = roomOf(no), ps = db.patients.filter(p => p.room === no);
+  const r = roomOf(no);
+  const rows = Array.from({ length: r.cap }, (_, i) => {
+    const b = i + 1, p = patientAt(no, b), bn = r.cap > 1 ? `<span class="bn">${b}</span>` : '';
+    return p
+      ? `<button class="pl" data-act="editPatient" data-id="${p.id}">${bn}<div><div class="who"><span class="n">${esc(p.name)}</span></div>${p.note ? `<div class="note">${esc(p.note)}</div>` : ''}</div></button>`
+      : `<button class="pl emptyslot" data-act="addPatientTo" data-no="${no}" data-bed="${b}">${bn}<span class="note">＋ ${r.cap > 1 ? b + '번 자리에 ' : ''}환자 배정</span></button>`;
+  }).join('');
   openSheet(`<h2>${no}호 <small style="font-weight:500;color:var(--sub)">${r.code} · ${r.vip ? '특실' : '일반'} ${r.cap}인</small></h2>
-    ${ps.map(p => `<button class="pl" data-act="editPatient" data-id="${p.id}"><div><div class="who"><span class="n">${esc(p.name)}</span></div>
-      <div class="note">${esc(p.note)}</div></div></button>`).join('') || '<p class="note">비어 있음</p>'}
-    <div class="acts"><button data-act="close">닫기</button>
-    ${ps.length < r.cap ? `<button class="pri" data-act="addPatientTo" data-no="${no}">＋ 환자 배정</button>` : ''}</div>`);
+    ${rows}<div class="acts"><button data-act="close">닫기</button></div>`);
 }
 
 /* ================= 액션 ================= */
@@ -470,7 +506,7 @@ document.addEventListener('click', ev => {
     case 'day': date = Number(t.dataset.n) === 0 ? todayStr() : addDays(date, Number(t.dataset.n)); render(); break;
     case 'addEntry': entryForm(); break;
     case 'addPatient': patientForm(); break;
-    case 'addPatientTo': patientForm(null, Number(t.dataset.no)); break;
+    case 'addPatientTo': patientForm(null, Number(t.dataset.no), Number(t.dataset.bed) || 1); break;
     case 'editPatient': patientForm(patient(id)); break;
     case 'editEntry': { const x = entry(); isSx(x) ? sxForm(x) : entryForm(x); break; }
     case 'addSx': sxForm(); break;
@@ -481,13 +517,14 @@ document.addEventListener('click', ev => {
     }
     case 'room': roomSheet(Number(t.dataset.no)); break;
     case 'close': closeSheet(); break;
+    case 'goSettings': closeSheet(); tab = 'settings'; render(); scrollTo(0, 0); break;
     case 'goRooms': closeSheet(); tab = 'rooms'; render(); scrollTo(0, 0); break;
     case 'pill': pillSheet(entry()); break;
     case 'addCat': catForm(); break;
     case 'editCat': catForm(db.cats.find(c => c.id === id)); break;
     case 'delCat': {
       const cid = sheet.dataset.cid, n = db.entries.filter(e => e.tid === cid).length;
-      if (confirm(n ? `이 치료를 쓰는 일정 ${n}개도 함께 삭제됩니다. 삭제할까요?` : '삭제할까요?')) {
+      if (confirm(n ? `이 시술을 쓰는 일정 ${n}개도 함께 삭제됩니다. 삭제할까요?` : '이 시술을 삭제할까요?')) {
         db.cats = db.cats.filter(c => c.id !== cid); db.entries = db.entries.filter(e => e.tid !== cid); save(); closeSheet(); render();
       }
       break;
@@ -586,9 +623,9 @@ function demo() {
   const C = (label, memo) => { const c = { id: uid(), label, memo }; db.cats.push(c); return c.id; };
   const pt = C('3층 PT', '3층 쭉 들어가서 좌측'), ot = C('2층 OT', '엘리베이터 내려서 우측 첫 번째 방'),
     xr = C('1층 방사선', '원무과 옆 복도 끝'), ex = C('3층 운동치료', '');
-  const P = (name, room, note = '') => { const p = { id: uid(), name, room, note }; db.patients.push(p); return p.id; };
-  const a = P('김영수', 1), b = P('박순자', 1, '낙상 주의'), c = P('이철민', 2, '우측 편마비'), d = P('최미숙', 5),
-    e = P('정대호', 7), f = P('한지원', 12), g = P('오세훈', 15), h = P('윤정자', 19), i = P('강민수', 19);
+  const P = (name, room, bed, note = '') => { const p = { id: uid(), name, room, bed, note }; db.patients.push(p); return p.id; };
+  const a = P('김영수', 1, 1), b = P('박순자', 1, 3, '낙상 주의'), c = P('이철민', 2, 1, '우측 편마비'), d = P('최미숙', 5, 4),
+    e = P('정대호', 7, 2), f = P('한지원', 12, 1), g = P('오세훈', 15, 1), h = P('윤정자', 19, 1), i = P('강민수', 19, 2);
   const E = (pid, time, tid, mob, daily = true) => db.entries.push({ id: uid(), pid, date, time, tid, mob, daily, memo: '' });
   [[a, '09:00', pt, 'walk'], [b, '09:00', pt, 'wheel'], [c, '09:30', ex, 'bed'], [d, '09:30', pt, 'walk'],
     [e, '10:00', ot, 'wheel'], [f, '10:30', pt, 'walk'], [g, '10:30', xr, 'bed', false], [h, '11:00', ex, 'wheel'],

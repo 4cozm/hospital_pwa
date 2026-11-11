@@ -183,3 +183,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 
 .newcat{display:grid;gap:8px;margin-top:8px}
 .newcat[hidden]{display:none}
+
+.bn{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;border-radius:7px;background:var(--brand);color:var(--brand-ink);font-size:13px;font-weight:800;margin-right:2px;flex:none}
+.pl.emptyslot{opacity:.65;border-style:dashed}
+.slot{align-items:center}
