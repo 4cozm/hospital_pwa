@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>병동 치료 스케줄</title>
+<meta name="theme-color" content="#0f766e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="치료스케줄">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="toasts" aria-live="polite"></div>
+<header id="top"></header>
+<main id="view"></main>
+<button id="fab" aria-label="일정 추가">＋</button>
+<nav id="tabs">
+  <button data-tab="today">오늘</button>
+  <button data-tab="rooms">병실</button>
+  <button data-tab="patients">환자</button>
+  <button data-tab="settings">설정</button>
+</nav>
+<dialog id="sheet"></dialog>
+<script src="app.js"></script>
+</body>
+</html>
