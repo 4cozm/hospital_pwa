@@ -402,7 +402,7 @@ function entryForm(e, presetPid) {
   if (!db.patients.length) return noPatientSheet();
   if (!db.cats.length) return noCatSheet();
   const isNew = !e;
-  e = e || { pid: presetPid || '', time: nextSlot(), tids: [], mob: presetPid ? lastMob(presetPid) : 'walk', daily: false, memo: '' };
+  e = e || { pid: presetPid || '', time: currentTime(), tids: [], mob: presetPid ? lastMob(presetPid) : 'walk', daily: false, memo: '' };
   openSheet(`<h2>${isNew ? `치료 일정 추가 · 오늘 ${fmtDate(todayStr())}` : '치료 일정 수정'}</h2>
   <form id="ef">
     ${pickerHtml(e.pid)}
@@ -499,9 +499,9 @@ function pillSheet(e, cid) {
     ${!isSx(e) && e.memo ? `<p class="note">일정 메모: ${esc(e.memo)}</p>` : ''}
     <div class="acts"><button data-act="close">닫기</button>${c ? `<button data-act="editCat" data-id="${c.id}">장소 메모 수정</button>` : ''}</div>`);
 }
-function nextSlot() { // 현재 시각 이후 가장 가까운 30분 단위
-  const m = Math.ceil((nowMin() + 1) / 30) * 30;
-  return `${pad(Math.min(23, Math.floor(m / 60)))}:${pad(m % 60 % 60)}`;
+function currentTime() { // 입력 기본값: 지금 시각 (HH:MM, 24시간)
+  const d = new Date();
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function roomSheet(no) {
