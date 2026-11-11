@@ -12,18 +12,34 @@ const MOB = {
   wheel: { label: '휠체어', escort: true },
   bed:   { label: '베드',   escort: true },
 };
-const PRESETS = ['물리치료', '도수치료', '운동치료', '전기치료', '작업치료', '방사선', 'MRI', 'CT', '투석', '검사'];
 const KEY = 'ward-schedule-v1';
 
 /* ================= 저장소 (localStorage 전용) ================= */
-const uid = () => Math.random().toString(36).slice(2, 10);
+function uid() { return Math.random().toString(36).slice(2, 10); }
 let db = load();
 function load() {
   try {
     const d = JSON.parse(localStorage.getItem(KEY));
-    if (d && d.patients && d.entries) return { status: {}, settings: { lead: 10 }, ...d };
+    if (d && d.patients && d.entries) return migrate({ status: {}, settings: { lead: 10 }, cats: [], ...d });
   } catch (e) {}
-  return { patients: [], entries: [], status: {}, settings: { lead: 10 } };
+  return { patients: [], entries: [], status: {}, settings: { lead: 10 }, cats: [] };
+}
+/* v1 → v2: 이동방식은 환자가 아니라 일정(entry)의 속성, 치료는 카테고리(cats) 참조 */
+function migrate(d) {
+  d.cats = d.cats || [];
+  const P = id => d.patients.find(p => p.id === id);
+  for (const e of d.entries) {
+    if (!e.mob) e.mob = P(e.pid)?.mob || 'walk';
+    if (!e.tid) {
+      const label = (e.tx || '').trim() || '미지정';
+      let c = d.cats.find(c => c.label === label);
+      if (!c) d.cats.push(c = { id: uid(), label, memo: '' });
+      e.tid = c.id;
+    }
+    delete e.tx;
+  }
+  d.patients.forEach(p => delete p.mob);
+  return d;
 }
 function save() {
   try { localStorage.setItem(KEY, JSON.stringify(db)); }
@@ -44,6 +60,10 @@ const fmtDate = s => {
   return `${d.getMonth() + 1}/${d.getDate()} (${'일월화수목금토'[d.getDay()]})`;
 };
 const patient = id => db.patients.find(p => p.id === id);
+const mobOf = e => (MOB[e.mob] ? e.mob : 'walk');
+const catOf = e => db.cats.find(c => c.id === e.tid);
+const txLabel = e => catOf(e)?.label || '(치료 미지정)';
+const txPill = e => `<button class="pill" data-act="pill" data-id="${e.id}">${esc(txLabel(e))}${catOf(e)?.memo ? ' <i>ⓘ</i>' : ''}</button>`;
 
 let tab = 'today';
 let date = todayStr();
@@ -67,7 +87,7 @@ function render() {
   ({ today: renderToday, rooms: renderRooms, patients: renderPatients, settings: renderSettings })[tab]();
 }
 
-function mobBadge(p) { return `<span class="badge ${p.mob}">${MOB[p.mob].label}</span>`; }
+function mobBadge(k) { return `<span class="badge ${k}">${MOB[k].label}</span>`; }
 function roomBox(p) {
   const r = roomOf(p.room);
   return `<div class="room ${r?.vip ? 'vip' : ''}"><b>${p.room}</b><small>호${r?.vip ? ' 특' : ''}</small></div>`;
@@ -78,8 +98,8 @@ function renderToday() {
   const list = entriesOn(date);
   const total = list.length;
   const done = list.filter(e => stOf(e, date) === 2).length;
-  const esc_ = list.filter(e => MOB[patient(e.pid).mob].escort && stOf(e, date) !== 2).length;
-  const solo = list.filter(e => !MOB[patient(e.pid).mob].escort && stOf(e, date) !== 2).length;
+  const esc_ = list.filter(e => MOB[mobOf(e)].escort && stOf(e, date) !== 2).length;
+  const solo = list.filter(e => !MOB[mobOf(e)].escort && stOf(e, date) !== 2).length;
 
   $('#top').innerHTML = `
     <div class="hrow">
@@ -116,7 +136,7 @@ function renderToday() {
       const open = g.filter(e => stOf(e, date) !== 2);
       const late = isToday && open.length && tmin(t) < now;
       const cur = isToday && open.length && tmin(t) >= now && tmin(t) - now <= 30;
-      const ec = g.filter(e => MOB[patient(e.pid).mob].escort).length;
+      const ec = g.filter(e => MOB[mobOf(e)].escort).length;
       html += `<section class="grp"><div class="gh ${late ? 'late' : cur ? 'now' : ''}">
         <span class="gt">${t}</span>
         <span class="gc">${g.length}명${ec ? ` · 모시러 ${ec}` : ''}${late ? ' · 지연' : ''}</span></div>
@@ -127,14 +147,14 @@ function renderToday() {
 }
 
 function hero(e) {
-  const p = patient(e.pid), st = stOf(e, date), m = MOB[p.mob];
+  const p = patient(e.pid), st = stOf(e, date), m = MOB[mobOf(e)];
   const diff = tmin(e.time) - nowMin();
   const dur = n => n >= 60 ? `${Math.floor(n / 60)}시간${n % 60 ? ' ' + n % 60 + '분' : ''}` : `${n}분`;
   const when = diff > 0 ? `${dur(diff)} 후` : diff === 0 ? '지금' : `${dur(-diff)} 지남`;
   return `<div class="hero">
     <div class="lab">${st === 1 ? '이송 중' : '다음 일정'} · ${when}</div>
     <div class="big"><span class="t">${e.time}</span><span class="rm">${p.room}호</span><span class="nm">${esc(p.name)}</span></div>
-    <div class="meta">${esc(e.tx)} · ${MOB[p.mob].label}${p.note ? ' · ' + esc(p.note) : ''}</div>
+    <div class="meta">${esc(txLabel(e))} · ${m.label}${p.note ? ' · ' + esc(p.note) : ''}</div>
     <div class="mini"><button class="go" data-act="adv" data-id="${e.id}">${advLabel(m, st)}</button></div>
   </div>`;
 }
@@ -144,20 +164,20 @@ function advLabel(m, st) {
 }
 
 function card(e, late) {
-  const p = patient(e.pid), st = stOf(e, date), m = MOB[p.mob];
+  const p = patient(e.pid), st = stOf(e, date), mk = mobOf(e), m = MOB[mk];
   let btns = '';
   if (st === 2) btns = `<button class="alt" data-act="undo" data-id="${e.id}">되돌리기</button>`;
   else {
-    const cls = m.escort ? (st === 0 ? 'esc ' + (p.mob === 'bed' ? 'b' : '') : 'fin') : 'fin';
+    const cls = m.escort ? (st === 0 ? 'esc ' + (mk === 'bed' ? 'b' : '') : 'fin') : 'fin';
     btns = `<button class="${cls}" data-act="adv" data-id="${e.id}">${advLabel(m, st)}</button>
       ${st === 1 ? `<button class="alt" data-act="undo" data-id="${e.id}">취소</button>` : ''}
       <button class="alt" data-act="editEntry" data-id="${e.id}" aria-label="수정">✎</button>`;
   }
   const badge = st === 2 ? '<span class="badge st">완료</span>' : st === 1 ? '<span class="badge go">이송 중</span>' : '';
-  return `<article class="card ${p.mob} ${st === 2 ? 'done' : ''} ${late ? 'late' : ''}">
+  return `<article class="card ${mk} ${st === 2 ? 'done' : ''} ${late ? 'late' : ''}">
     ${roomBox(p)}
-    <div class="who"><span class="n">${esc(p.name)}</span>${mobBadge(p)}${badge}</div>
-    <div><span class="tx">${esc(e.tx)}</span>${e.daily ? ' <span class="note">· 매일</span>' : ''}
+    <div class="who"><span class="n">${esc(p.name)}</span>${mobBadge(mk)}${badge}</div>
+    <div>${txPill(e)}${e.daily ? ' <span class="note">· 매일</span>' : ''}
       ${p.note || e.memo ? `<div class="note">${esc([p.note, e.memo].filter(Boolean).join(' · '))}</div>` : ''}</div>
     <div class="act">${btns}</div>
   </article>`;
@@ -166,16 +186,15 @@ function card(e, late) {
 function renderRooms() {
   $('#top').innerHTML = `<div class="hrow"><h1>병실 현황</h1></div>
     <div class="sum"><span>입원 <b>${db.patients.length}</b>명</span></div>`;
-  const legend = `<div class="legend"><span><i class="dot walk"></i>혼자</span><span><i class="dot wheel"></i>휠체어</span><span><i class="dot bed"></i>베드</span></div>`;
   const card_ = r => {
     const ps = db.patients.filter(p => p.room === r.no);
     const slots = Array.from({ length: r.cap }, (_, i) => ps[i]
-      ? `<div class="slot"><i class="dot ${ps[i].mob}"></i>${esc(ps[i].name)}</div>`
+      ? `<div class="slot">${esc(ps[i].name)}</div>`
       : `<div class="slot empty">＋ 빈 자리</div>`).join('');
     return `<button class="rc ${r.vip ? 'vip' : ''}" data-act="room" data-no="${r.no}">
       <div class="rh"><b>${r.no}호</b><span>${r.code} · ${r.vip ? '특실' : '일반'} ${r.cap}인</span></div>${slots}</button>`;
   };
-  $('#view').innerHTML = legend + `<div class="sec">일반실 (1~11호)</div><div class="rgrid">${ROOMS.filter(r => !r.vip).map(card_).join('')}</div>
+  $('#view').innerHTML = `<div class="sec">일반실 (1~11호)</div><div class="rgrid">${ROOMS.filter(r => !r.vip).map(card_).join('')}</div>
     <div class="sec">특실 (12~19호)</div><div class="rgrid">${ROOMS.filter(r => r.vip).map(card_).join('')}</div>`;
 }
 
@@ -184,7 +203,7 @@ function renderPatients() {
   const ps = [...db.patients].sort((a, b) => a.room - b.room || a.name.localeCompare(b.name, 'ko'));
   $('#view').innerHTML = ps.length ? ps.map(p => `
     <button class="pl" data-act="editPatient" data-id="${p.id}">${roomBox(p)}
-      <div><div class="who"><span class="n">${esc(p.name)}</span>${mobBadge(p)}</div>
+      <div><div class="who"><span class="n">${esc(p.name)}</span></div>
       <div class="note">${db.entries.filter(e => e.pid === p.id).length}개 일정${p.note ? ' · ' + esc(p.note) : ''}</div></div></button>`).join('')
     : `<div class="empty-msg">등록된 환자가 없습니다.<br><button class="btn pri" data-act="addPatient">＋ 환자 추가</button>
        <br><button class="btn" data-act="demo">예시 데이터 불러오기</button></div>`;
@@ -194,6 +213,10 @@ function renderSettings() {
   $('#top').innerHTML = `<div class="hrow"><h1>설정</h1></div>`;
   const perm = 'Notification' in window ? Notification.permission : 'unsupported';
   $('#view').innerHTML = `
+  <div class="set"><h3>치료 종류</h3>
+    <p>일정 입력 때 이 목록에서 고르고, 일정에는 필로 표시됩니다. 필을 누르면 메모가 나옵니다.</p>
+    <div class="chips" style="margin:8px 0">${db.cats.map(c => `<button class="pill" data-act="editCat" data-id="${c.id}">${esc(c.label)}${c.memo ? ' <i>ⓘ</i>' : ''}</button>`).join('') || '<span class="note">아직 없음</span>'}</div>
+    <button class="btn pri" data-act="addCat">＋ 치료 종류 추가</button></div>
   <div class="set"><h3>알림</h3>
     <div class="f"><label>치료 몇 분 전에 알릴까요</label>
       <select id="lead">${[0, 5, 10, 15, 20, 30].map(n => `<option value="${n}" ${db.settings.lead === n ? 'selected' : ''}>${n ? n + '분 전' : '정각'}</option>`).join('')}</select></div>
@@ -231,14 +254,11 @@ function roomOptions(sel) {
 
 function patientForm(p, presetRoom) {
   const isNew = !p;
-  p = p || { name: '', room: presetRoom || 1, mob: 'walk', note: '' };
+  p = p || { name: '', room: presetRoom || 1, note: '' };
   openSheet(`<h2>${isNew ? '환자 추가' : '환자 수정'}</h2>
   <form id="pf">
     <div class="f"><label>이름</label><input name="name" value="${esc(p.name)}" required autocomplete="off"></div>
     <div class="f"><label>병실</label><select name="room">${roomOptions(p.room)}</select></div>
-    <div class="f"><label>이동 방식</label><div class="seg">
-      ${Object.entries(MOB).map(([k, v]) => `<label><input type="radio" name="mob" value="${k}" ${p.mob === k ? 'checked' : ''}><span class="${k}">${v.label}</span></label>`).join('')}
-    </div></div>
     <div class="f"><label>메모 (선택)</label><input name="note" value="${esc(p.note)}" placeholder="예: 왼쪽 어깨 주의, 보호자 동행" autocomplete="off"></div>
     <div class="acts">
       ${isNew ? '' : '<button type="button" class="danger" data-act="delPatient">퇴원</button>'}
@@ -252,29 +272,39 @@ function patientForm(p, presetRoom) {
     const r = roomOf(room);
     const occ = db.patients.filter(x => x.room === room && x.id !== p.id).length;
     if (occ >= r.cap && !confirm(`${room}호는 정원 ${r.cap}명이 이미 찼습니다. 그래도 배정할까요?`)) return;
-    const data = { name: f.get('name').trim(), room, mob: f.get('mob'), note: f.get('note').trim() };
+    const data = { name: f.get('name').trim(), room, note: f.get('note').trim() };
     if (isNew) db.patients.push({ id: uid(), ...data }); else Object.assign(p, data);
     save(); closeSheet(); render();
   };
   sheet.dataset.pid = p.id || '';
 }
 
+function lastMob(pid) {
+  const l = db.entries.filter(x => x.pid === pid).pop();
+  return l ? mobOf(l) : 'walk';
+}
 function entryForm(e, presetPid) {
   if (!db.patients.length) { toast('먼저 환자를 추가하세요', ''); patientForm(); return; }
+  if (!db.cats.length) {
+    openSheet(`<h2>치료 종류가 없습니다</h2><p class="note">"3층 PT" 같은 치료 종류를 먼저 추가하세요. (설정 탭에서도 관리할 수 있습니다)</p>
+      <div class="acts"><button data-act="close">닫기</button><button class="pri" data-act="addCat">＋ 치료 종류 추가</button></div>`);
+    return;
+  }
   const isNew = !e;
   const first = presetPid || db.patients[0].id;
-  e = e || { pid: first, time: nextSlot(), tx: '', daily: false, memo: '' };
+  e = e || { pid: first, time: nextSlot(), tid: db.cats[0].id, mob: lastMob(first), daily: false, memo: '' };
   const ps = [...db.patients].sort((a, b) => a.room - b.room);
   openSheet(`<h2>${isNew ? '일정 추가' : '일정 수정'} · ${fmtDate(e.date || date)}</h2>
   <form id="ef">
-    <div class="f"><label>환자</label><select name="pid">${ps.map(p => `<option value="${p.id}" ${p.id === e.pid ? 'selected' : ''}>${p.room}호 ${esc(p.name)} · ${MOB[p.mob].label}</option>`).join('')}</select></div>
-    <div class="row">
-      <div class="f"><label>시간</label><input type="time" name="time" value="${e.time}" required></div>
-      <div class="f"><label>치료</label><input name="tx" value="${esc(e.tx)}" list="txl" required autocomplete="off" placeholder="물리치료"></div>
-    </div>
-    <datalist id="txl">${PRESETS.map(t => `<option value="${t}">`).join('')}</datalist>
-    <div class="chips">${PRESETS.slice(0, 6).map(t => `<button type="button" data-act="preset" data-v="${t}">${t}</button>`).join('')}</div>
-    <div class="f" style="margin-top:12px"><label>메모 (선택)</label><input name="memo" value="${esc(e.memo)}" autocomplete="off"></div>
+    <div class="f"><label>환자</label><select name="pid">${ps.map(p => `<option value="${p.id}" ${p.id === e.pid ? 'selected' : ''}>${p.room}호 ${esc(p.name)}</option>`).join('')}</select></div>
+    <div class="f"><label>이동 방식</label><div class="seg">
+      ${Object.entries(MOB).map(([k, v]) => `<label><input type="radio" name="mob" value="${k}" ${mobOf(e) === k ? 'checked' : ''}><span class="${k}">${v.label}</span></label>`).join('')}
+    </div></div>
+    <div class="f"><label>시간</label><input type="time" name="time" value="${e.time}" required></div>
+    <div class="f"><label>치료</label><div class="catpick">
+      ${db.cats.map(c => `<label><input type="radio" name="tid" value="${c.id}" ${c.id === e.tid ? 'checked' : ''}><span>${esc(c.label)}</span></label>`).join('')}
+    </div></div>
+    <div class="f"><label>일정 메모 (선택)</label><input name="memo" value="${esc(e.memo)}" autocomplete="off"></div>
     <div class="f"><label class="chk"><input type="checkbox" name="daily" ${e.daily ? 'checked' : ''}> 이 날짜부터 매일 반복</label></div>
     <div class="acts">
       ${isNew ? '' : '<button type="button" class="danger" data-act="delEntry">삭제</button>'}
@@ -282,13 +312,43 @@ function entryForm(e, presetPid) {
       <button class="pri">저장</button></div>
   </form>`);
   sheet.dataset.eid = e.id || '';
+  if (isNew) $('#ef [name=pid]').onchange = ev => {   // 환자를 바꾸면 그 환자의 지난 이동 방식을 기본값으로
+    const r = $(`#ef [name=mob][value=${lastMob(ev.target.value)}]`); if (r) r.checked = true;
+  };
   $('#ef').onsubmit = ev => {
     ev.preventDefault();
     const f = new FormData(ev.target);
-    const data = { pid: f.get('pid'), time: f.get('time'), tx: f.get('tx').trim(), memo: f.get('memo').trim(), daily: f.get('daily') === 'on' };
+    const data = { pid: f.get('pid'), time: f.get('time'), tid: f.get('tid'), mob: f.get('mob'), memo: f.get('memo').trim(), daily: f.get('daily') === 'on' };
     if (isNew) db.entries.push({ id: uid(), date, ...data }); else Object.assign(e, data);
     save(); closeSheet(); render();
   };
+}
+function catForm(c) {
+  const isNew = !c;
+  c = c || { label: '', memo: '' };
+  openSheet(`<h2>${isNew ? '치료 종류 추가' : '치료 종류 수정'}</h2>
+  <form id="cf">
+    <div class="f"><label>표시 이름 (필에 보이는 글자)</label><input name="label" value="${esc(c.label)}" required autocomplete="off" placeholder="예: 3층 PT"></div>
+    <div class="f"><label>상세 메모 (필을 누르면 표시)</label><textarea name="memo" rows="3" placeholder="예: 3층 쭉 들어가서 좌측">${esc(c.memo)}</textarea></div>
+    <div class="acts">
+      ${isNew ? '' : '<button type="button" class="danger" data-act="delCat">삭제</button>'}
+      <button type="button" data-act="close">취소</button>
+      <button class="pri">저장</button></div>
+  </form>`);
+  sheet.dataset.cid = c.id || '';
+  $('#cf').onsubmit = ev => {
+    ev.preventDefault();
+    const f = new FormData(ev.target), data = { label: f.get('label').trim(), memo: f.get('memo').trim() };
+    if (isNew) db.cats.push({ id: uid(), ...data }); else Object.assign(c, data);
+    save(); closeSheet(); render();
+  };
+}
+function pillSheet(e) {
+  const c = catOf(e);
+  openSheet(`<h2>${esc(txLabel(e))}</h2>
+    ${c?.memo ? `<p style="font-size:20px;line-height:1.5;margin:0 0 8px;white-space:pre-wrap">${esc(c.memo)}</p>` : '<p class="note">상세 메모가 없습니다. 설정에서 추가할 수 있습니다.</p>'}
+    ${e.memo ? `<p class="note">일정 메모: ${esc(e.memo)}</p>` : ''}
+    <div class="acts"><button data-act="close">닫기</button>${c ? `<button data-act="editCat" data-id="${c.id}">메모 수정</button>` : ''}</div>`);
 }
 function nextSlot() { // 현재 시각 이후 가장 가까운 30분 단위
   const m = Math.ceil((nowMin() + 1) / 30) * 30;
@@ -298,7 +358,7 @@ function nextSlot() { // 현재 시각 이후 가장 가까운 30분 단위
 function roomSheet(no) {
   const r = roomOf(no), ps = db.patients.filter(p => p.room === no);
   openSheet(`<h2>${no}호 <small style="font-weight:500;color:var(--sub)">${r.code} · ${r.vip ? '특실' : '일반'} ${r.cap}인</small></h2>
-    ${ps.map(p => `<button class="pl" data-act="editPatient" data-id="${p.id}"><div><div class="who"><span class="n">${esc(p.name)}</span>${mobBadge(p)}</div>
+    ${ps.map(p => `<button class="pl" data-act="editPatient" data-id="${p.id}"><div><div class="who"><span class="n">${esc(p.name)}</span></div>
       <div class="note">${esc(p.note)}</div></div></button>`).join('') || '<p class="note">비어 있음</p>'}
     <div class="acts"><button data-act="close">닫기</button>
     ${ps.length < r.cap ? `<button class="pri" data-act="addPatientTo" data-no="${no}">＋ 환자 배정</button>` : ''}</div>`);
@@ -320,12 +380,21 @@ document.addEventListener('click', ev => {
     case 'editEntry': entryForm(entry()); break;
     case 'room': roomSheet(Number(t.dataset.no)); break;
     case 'close': closeSheet(); break;
-    case 'preset': { const i = $('#ef [name=tx]'); i.value = t.dataset.v; break; }
-    case 'adv': {
-      const e = entry(), p = patient(e.pid), st = stOf(e, date);
-      setSt(e, date, MOB[p.mob].escort && st === 0 ? 1 : 2); render(); break;
+    case 'pill': pillSheet(entry()); break;
+    case 'addCat': catForm(); break;
+    case 'editCat': catForm(db.cats.find(c => c.id === id)); break;
+    case 'delCat': {
+      const cid = sheet.dataset.cid, n = db.entries.filter(e => e.tid === cid).length;
+      if (confirm(n ? `이 치료를 쓰는 일정 ${n}개도 함께 삭제됩니다. 삭제할까요?` : '삭제할까요?')) {
+        db.cats = db.cats.filter(c => c.id !== cid); db.entries = db.entries.filter(e => e.tid !== cid); save(); closeSheet(); render();
+      }
+      break;
     }
-    case 'undo': { const e = entry(); setSt(e, date, stOf(e, date) === 2 && MOB[patient(e.pid).mob].escort ? 1 : 0); render(); break; }
+    case 'adv': {
+      const e = entry(), st = stOf(e, date);
+      setSt(e, date, MOB[mobOf(e)].escort && st === 0 ? 1 : 2); render(); break;
+    }
+    case 'undo': { const e = entry(); setSt(e, date, stOf(e, date) === 2 && MOB[mobOf(e)].escort ? 1 : 0); render(); break; }
     case 'delEntry': {
       const eid = sheet.dataset.eid;
       if (confirm('이 일정을 삭제할까요?')) { db.entries = db.entries.filter(e => e.id !== eid); save(); closeSheet(); render(); }
@@ -345,7 +414,7 @@ document.addEventListener('click', ev => {
     case 'import': $('#file').click(); break;
     case 'demo': demo(); break;
     case 'wipe':
-      if (confirm('모든 환자·일정 데이터를 삭제합니다. 되돌릴 수 없습니다.')) { db = { patients: [], entries: [], status: {}, settings: db.settings }; save(); render(); }
+      if (confirm('모든 환자·일정 데이터를 삭제합니다. 되돌릴 수 없습니다.')) { db = { ...db, patients: [], entries: [], status: {} }; save(); render(); }
       break;
     case 'toastGo': t.closest('.toast').remove(); tab = 'today'; date = todayStr(); render(); break;
   }
@@ -364,7 +433,7 @@ function importFile(ev) {
     const d = JSON.parse(txt);
     if (!Array.isArray(d.patients) || !Array.isArray(d.entries)) throw 0;
     if (!confirm('현재 데이터를 백업 파일로 덮어쓸까요?')) return;
-    db = { status: {}, settings: { lead: 10 }, ...d }; save(); render(); toast('불러오기 완료', '');
+    db = migrate({ status: {}, settings: { lead: 10 }, cats: [], ...d }); save(); render(); toast('불러오기 완료', '');
   }).catch(() => toast('불러오기 실패', '올바른 백업 파일이 아닙니다'));
 }
 function exportIcs() {
@@ -375,7 +444,7 @@ function exportIcs() {
     const end = tmin(e.time) + 30;
     return ['BEGIN:VEVENT', `UID:${e.id}-${d0}@ward-schedule`, `DTSTAMP:${d0}T000000`,
       `DTSTART:${d0}T${h}${m}00`, `DTEND:${d0}T${pad(Math.floor(end / 60) % 24)}${pad(end % 60)}00`,
-      `SUMMARY:${ics(`${p.room}호 ${p.name} ${e.tx} (${MOB[p.mob].label})`)}`,
+      `SUMMARY:${ics(`${p.room}호 ${p.name} ${txLabel(e)} (${MOB[mobOf(e)].label})`)}`, `DESCRIPTION:${ics(catOf(e)?.memo || '')}`,
       'BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:치료 이송', `TRIGGER:-PT${db.settings.lead}M`, 'END:VALARM', 'END:VEVENT'].join('\r\n');
   });
   if (!ev.length) return toast('내보낼 일정이 없습니다', '');
@@ -398,8 +467,8 @@ function tick() {
     if (fired.has(k) || now < tmin(e.time) - lead || now > tmin(e.time) + 30) continue;
     fired.add(k); sessionStorage.setItem('fired', JSON.stringify([...fired]));
     const p = patient(e.pid);
-    const act = MOB[p.mob].escort ? `${MOB[p.mob].label} 모시러 가기` : '혼자 이동 · 도착 확인';
-    const title = `${e.time} ${p.room}호 ${p.name}`, body = `${e.tx} · ${act}`;
+    const act = MOB[mobOf(e)].escort ? `${MOB[mobOf(e)].label} 모시러 가기` : '혼자 이동 · 도착 확인';
+    const title = `${e.time} ${p.room}호 ${p.name}`, body = `${txLabel(e)} · ${act}`;
     toast(title, body, true);
     try { navigator.vibrate?.([200, 100, 200]); } catch (e) {}
     if ('Notification' in window && Notification.permission === 'granted') {
@@ -411,15 +480,17 @@ function tick() {
 
 /* ================= 예시 데이터 ================= */
 function demo() {
-  if (db.patients.length && !confirm('현재 데이터에 예시 데이터를 추가합니다.')) return;
-  const P = (name, room, mob, note = '') => { const p = { id: uid(), name, room, mob, note }; db.patients.push(p); return p.id; };
-  const a = P('김영수', 1, 'walk'), b = P('박순자', 1, 'wheel', '낙상 주의'), c = P('이철민', 2, 'bed', '우측 편마비'),
-    d = P('최미숙', 5, 'walk'), e = P('정대호', 7, 'wheel'), f = P('한지원', 12, 'walk', '특실'), g = P('오세훈', 15, 'bed'),
-    h = P('윤정자', 19, 'wheel'), i = P('강민수', 19, 'walk');
-  const E = (pid, time, tx, daily = true) => db.entries.push({ id: uid(), pid, date, time, tx, daily, memo: '' });
-  [[a, '09:00', '물리치료'], [b, '09:00', '물리치료'], [c, '09:30', '운동치료'], [d, '09:30', '도수치료'],
-    [e, '10:00', '전기치료'], [f, '10:30', '물리치료'], [g, '10:30', '방사선', false], [h, '11:00', '운동치료'],
-    [i, '11:00', '물리치료'], [a, '14:00', '도수치료'], [c, '15:00', '물리치료']].forEach(x => E(...x));
+  if ((db.patients.length || db.cats.length) && !confirm('현재 데이터에 예시 데이터를 추가합니다.')) return;
+  const C = (label, memo) => { const c = { id: uid(), label, memo }; db.cats.push(c); return c.id; };
+  const pt = C('3층 PT', '3층 쭉 들어가서 좌측'), ot = C('2층 OT', '엘리베이터 내려서 우측 첫 번째 방'),
+    xr = C('1층 방사선', '원무과 옆 복도 끝'), ex = C('3층 운동치료', '');
+  const P = (name, room, note = '') => { const p = { id: uid(), name, room, note }; db.patients.push(p); return p.id; };
+  const a = P('김영수', 1), b = P('박순자', 1, '낙상 주의'), c = P('이철민', 2, '우측 편마비'), d = P('최미숙', 5),
+    e = P('정대호', 7), f = P('한지원', 12), g = P('오세훈', 15), h = P('윤정자', 19), i = P('강민수', 19);
+  const E = (pid, time, tid, mob, daily = true) => db.entries.push({ id: uid(), pid, date, time, tid, mob, daily, memo: '' });
+  [[a, '09:00', pt, 'walk'], [b, '09:00', pt, 'wheel'], [c, '09:30', ex, 'bed'], [d, '09:30', pt, 'walk'],
+    [e, '10:00', ot, 'wheel'], [f, '10:30', pt, 'walk'], [g, '10:30', xr, 'bed', false], [h, '11:00', ex, 'wheel'],
+    [i, '11:00', pt, 'walk'], [a, '14:00', ot, 'walk'], [c, '15:00', pt, 'bed']].forEach(x => E(...x));
   save(); render(); toast('예시 데이터를 불러왔습니다', '');
 }
 
