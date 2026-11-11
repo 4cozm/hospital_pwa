@@ -41,6 +41,12 @@ function migrate(d) {
     delete e.tx;
   }
   d.patients.forEach(p => delete p.mob);
+  for (const p of d.patients) {           // v3: 병실 내 자리 번호(bed). 없으면 빈 번호부터 순서대로
+    if (p.bed) continue;
+    const used = new Set(d.patients.filter(x => x.room === p.room && x.bed).map(x => x.bed));
+    let b = 1; while (used.has(b)) b++;
+    p.bed = b;
+  }
   return d;
 }
 function save() {
@@ -62,6 +68,8 @@ const fmtDate = s => {
   return `${d.getMonth() + 1}/${d.getDate()} (${'일월화수목금토'[d.getDay()]})`;
 };
 const patient = id => db.patients.find(p => p.id === id);
+const patientAt = (room, bed, exceptId) => db.patients.find(p => p.room === room && p.bed === bed && p.id !== exceptId);
+const bedLabel = p => (roomOf(p.room)?.cap > 1 && p.bed ? `${p.bed}번` : '');
 const mobOf = e => (MOB[e.mob] ? e.mob : 'walk');
 const isSx = e => e.kind === 'sx';
 const catOf = e => isSx(e) ? null : db.cats.find(c => c.id === e.tid);
@@ -100,7 +108,7 @@ function render() {
 function mobBadge(k) { return `<span class="badge ${k}">${MOB[k].label}</span>`; }
 function roomBox(p) {
   const r = roomOf(p.room);
-  return `<div class="room ${r?.vip ? 'vip' : ''}"><b>${p.room}</b><small>호${r?.vip ? ' 특' : ''}</small></div>`;
+  return `<div class="room ${r?.vip ? 'vip' : ''}"><b>${p.room}</b><small>호${r?.vip ? ' 특' : ''}${bedLabel(p) ? ' · ' + bedLabel(p) : ''}</small></div>`;
 }
 
 function renderToday() {
@@ -164,7 +172,7 @@ function hero(e) {
   return `<div class="hero">
     <div class="lab">${isSx(e) ? '수술 · ' : ''}${st === 1 ? '이송 중' : '다음 일정'} · ${when}</div>
     <div class="big"><span class="t">${e.time}</span><span class="rm">${p.room}호</span><span class="nm">${esc(p.name)}</span></div>
-    <div class="meta">${esc(txLabel(e))} · ${m.label}${p.note ? ' · ' + esc(p.note) : ''}</div>
+    <div class="meta">${bedLabel(p) ? bedLabel(p) + ' · ' : ''}${esc(txLabel(e))} · ${m.label}${p.note ? ' · ' + esc(p.note) : ''}</div>
     <div class="mini"><button class="go" data-act="adv" data-id="${e.id}">${advLabel(m, st)}</button></div>
   </div>`;
 }
@@ -196,10 +204,10 @@ function renderRooms() {
   $('#top').innerHTML = `<div class="hrow"><h1>병실 현황</h1></div>
     <div class="sum"><span>입원 <b>${db.patients.length}</b>명</span></div>`;
   const card_ = r => {
-    const ps = db.patients.filter(p => p.room === r.no);
-    const slots = Array.from({ length: r.cap }, (_, i) => ps[i]
-      ? `<div class="slot">${esc(ps[i].name)}</div>`
-      : `<div class="slot empty">＋ 빈 자리</div>`).join('');
+    const slots = Array.from({ length: r.cap }, (_, i) => {
+      const pa = patientAt(r.no, i + 1), bn = r.cap > 1 ? `<span class="bn">${i + 1}</span>` : '';
+      return pa ? `<div class="slot">${bn}${esc(pa.name)}</div>` : `<div class="slot empty">${bn}빈 자리</div>`;
+    }).join('');
     return `<button class="rc ${r.vip ? 'vip' : ''}" data-act="room" data-no="${r.no}">
       <div class="rh"><b>${r.no}호</b><span>${r.code} · ${r.vip ? '특실' : '일반'} ${r.cap}인</span></div>${slots}</button>`;
   };
@@ -280,33 +288,53 @@ function closeSheet() { if (sheet.open) sheet.close(); }
 sheet.addEventListener('click', e => { if (e.target === sheet) closeSheet(); });
 
 function roomOptions(sel) {
-  return ROOMS.map(r => {
+  const opts = ROOMS.map(r => {
     const n = db.patients.filter(p => p.room === r.no).length;
-    return `<option value="${r.no}" ${sel === r.no ? 'selected' : ''}>${r.no}호 (${r.code}) ${n}/${r.cap}${r.vip ? ' 특실' : ''}</option>`;
+    const full = n >= r.cap && r.no !== sel;
+    return `<option value="${r.no}" ${sel === r.no ? 'selected' : ''} ${full ? 'disabled' : ''}>${r.no}호 ${n}/${r.cap}${r.vip ? ' 특실' : ''}${full ? ' (만실)' : ''}</option>`;
   }).join('');
+  return (sel ? '' : '<option value="">병실을 선택하세요</option>') + opts;
+}
+/* 자리 번호: 사용 중인 자리는 누가 쓰는지 보여주되 선택 불가 */
+function bedOptions(room, selfId, sel) {
+  const r = roomOf(room);
+  if (!r) return '<select name="bed" disabled><option>병실을 먼저 선택하세요</option></select>';
+  if (r.cap === 1) return '<input type="hidden" name="bed" value="1"><div class="note">1인실</div>';
+  const opts = Array.from({ length: r.cap }, (_, i) => {
+    const b = i + 1, o = patientAt(room, b, selfId);
+    return `<option value="${b}" ${sel === b ? 'selected' : ''} ${o ? 'disabled' : ''}>${b}번${o ? ` — ${esc(o.name)} (사용 중)` : ''}</option>`;
+  }).join('');
+  return `<select name="bed" required>${sel ? '' : '<option value="">자리 번호를 선택하세요</option>'}${opts}</select>`;
 }
 
-function patientForm(p, presetRoom) {
+function patientForm(p, presetRoom, presetBed) {
   const isNew = !p;
-  p = p || { name: '', room: presetRoom || 1, note: '' };
+  p = p || { name: '', room: presetRoom || null, bed: presetBed || null, note: '' };
   openSheet(`<h2>${isNew ? '환자 추가' : '환자 수정'}</h2>
   <form id="pf">
     <div class="f"><label>이름</label><input name="name" value="${esc(p.name)}" required autocomplete="off"></div>
-    <div class="f"><label>병실</label><select name="room">${roomOptions(p.room)}</select></div>
+    <div class="row">
+      <div class="f"><label>병실</label><select name="room" required>${roomOptions(p.room)}</select></div>
+      <div class="f"><label>자리 번호</label><div id="bedwrap">${bedOptions(p.room, p.id, p.bed)}</div></div>
+    </div>
     <div class="f"><label>메모 (선택)</label><input name="note" value="${esc(p.note)}" placeholder="예: 왼쪽 어깨 주의, 보호자 동행" autocomplete="off"></div>
     <div class="acts">
       ${isNew ? '' : '<button type="button" class="danger" data-act="delPatient">퇴원</button>'}
       <button type="button" data-act="close">취소</button>
       <button class="pri">저장</button></div>
   </form>`);
+  $('#pf [name=room]').onchange = ev => {    // 병실을 바꾸면 자리 번호를 다시 고르게 함
+    const room = Number(ev.target.value) || null;
+    $('#bedwrap').innerHTML = bedOptions(room, p.id, room === p.room ? p.bed : null);
+  };
   $('#pf').onsubmit = ev => {
     ev.preventDefault();
     const f = new FormData(ev.target);
-    const room = Number(f.get('room'));
-    const r = roomOf(room);
-    const occ = db.patients.filter(x => x.room === room && x.id !== p.id).length;
-    if (occ >= r.cap && !confirm(`${room}호는 정원 ${r.cap}명이 이미 찼습니다. 그래도 배정할까요?`)) return;
-    const data = { name: f.get('name').trim(), room, note: f.get('note').trim() };
+    const room = Number(f.get('room')), bed = Number(f.get('bed'));
+    if (!roomOf(room) || !bed) return toast('병실과 자리 번호를 선택하세요', '');
+    const other = patientAt(room, bed, p.id);
+    if (other) return toast(`${room}호 ${bed}번은 ${other.name} 님이 사용 중입니다`, '');
+    const data = { name: f.get('name').trim(), room, bed, note: f.get('note').trim() };
     if (isNew) db.patients.push({ id: uid(), ...data }); else Object.assign(p, data);
     save(); closeSheet(); render();
   };
@@ -320,8 +348,8 @@ function noPatientSheet() {
 }
 /* 환자 선택: 기본값 없이 비워 두어 엉뚱한 환자에 저장되는 실수를 막는다 */
 function patientSelect(sel, blank) {
-  const ps = [...db.patients].sort((a, b) => a.room - b.room || a.name.localeCompare(b.name, 'ko'));
-  return `<select name="pid" required>${blank ? '<option value="">환자를 선택하세요</option>' : ''}${ps.map(p => `<option value="${p.id}" ${p.id === sel ? 'selected' : ''}>${p.room}호 ${esc(p.name)}</option>`).join('')}</select>`;
+  const ps = [...db.patients].sort((a, b) => a.room - b.room || a.bed - b.bed);
+  return `<select name="pid" required>${blank ? '<option value="">환자를 선택하세요</option>' : ''}${ps.map(p => `<option value="${p.id}" ${p.id === sel ? 'selected' : ''}>${p.room}호 ${bedLabel(p) ? bedLabel(p) + ' ' : ''}${esc(p.name)}</option>`).join('')}</select>`;
 }
 function lastMob(pid) {
   const l = db.entries.filter(x => x.pid === pid).pop();
@@ -451,12 +479,15 @@ function nextSlot() { // 현재 시각 이후 가장 가까운 30분 단위
 }
 
 function roomSheet(no) {
-  const r = roomOf(no), ps = db.patients.filter(p => p.room === no);
+  const r = roomOf(no);
+  const rows = Array.from({ length: r.cap }, (_, i) => {
+    const b = i + 1, p = patientAt(no, b), bn = r.cap > 1 ? `<span class="bn">${b}</span>` : '';
+    return p
+      ? `<button class="pl" data-act="editPatient" data-id="${p.id}">${bn}<div><div class="who"><span class="n">${esc(p.name)}</span></div>${p.note ? `<div class="note">${esc(p.note)}</div>` : ''}</div></button>`
+      : `<button class="pl emptyslot" data-act="addPatientTo" data-no="${no}" data-bed="${b}">${bn}<span class="note">＋ ${r.cap > 1 ? b + '번 자리에 ' : ''}환자 배정</span></button>`;
+  }).join('');
   openSheet(`<h2>${no}호 <small style="font-weight:500;color:var(--sub)">${r.code} · ${r.vip ? '특실' : '일반'} ${r.cap}인</small></h2>
-    ${ps.map(p => `<button class="pl" data-act="editPatient" data-id="${p.id}"><div><div class="who"><span class="n">${esc(p.name)}</span></div>
-      <div class="note">${esc(p.note)}</div></div></button>`).join('') || '<p class="note">비어 있음</p>'}
-    <div class="acts"><button data-act="close">닫기</button>
-    ${ps.length < r.cap ? `<button class="pri" data-act="addPatientTo" data-no="${no}">＋ 환자 배정</button>` : ''}</div>`);
+    ${rows}<div class="acts"><button data-act="close">닫기</button></div>`);
 }
 
 /* ================= 액션 ================= */
@@ -470,7 +501,7 @@ document.addEventListener('click', ev => {
     case 'day': date = Number(t.dataset.n) === 0 ? todayStr() : addDays(date, Number(t.dataset.n)); render(); break;
     case 'addEntry': entryForm(); break;
     case 'addPatient': patientForm(); break;
-    case 'addPatientTo': patientForm(null, Number(t.dataset.no)); break;
+    case 'addPatientTo': patientForm(null, Number(t.dataset.no), Number(t.dataset.bed) || 1); break;
     case 'editPatient': patientForm(patient(id)); break;
     case 'editEntry': { const x = entry(); isSx(x) ? sxForm(x) : entryForm(x); break; }
     case 'addSx': sxForm(); break;
@@ -586,9 +617,9 @@ function demo() {
   const C = (label, memo) => { const c = { id: uid(), label, memo }; db.cats.push(c); return c.id; };
   const pt = C('3층 PT', '3층 쭉 들어가서 좌측'), ot = C('2층 OT', '엘리베이터 내려서 우측 첫 번째 방'),
     xr = C('1층 방사선', '원무과 옆 복도 끝'), ex = C('3층 운동치료', '');
-  const P = (name, room, note = '') => { const p = { id: uid(), name, room, note }; db.patients.push(p); return p.id; };
-  const a = P('김영수', 1), b = P('박순자', 1, '낙상 주의'), c = P('이철민', 2, '우측 편마비'), d = P('최미숙', 5),
-    e = P('정대호', 7), f = P('한지원', 12), g = P('오세훈', 15), h = P('윤정자', 19), i = P('강민수', 19);
+  const P = (name, room, bed, note = '') => { const p = { id: uid(), name, room, bed, note }; db.patients.push(p); return p.id; };
+  const a = P('김영수', 1, 1), b = P('박순자', 1, 3, '낙상 주의'), c = P('이철민', 2, 1, '우측 편마비'), d = P('최미숙', 5, 4),
+    e = P('정대호', 7, 2), f = P('한지원', 12, 1), g = P('오세훈', 15, 1), h = P('윤정자', 19, 1), i = P('강민수', 19, 2);
   const E = (pid, time, tid, mob, daily = true) => db.entries.push({ id: uid(), pid, date, time, tid, mob, daily, memo: '' });
   [[a, '09:00', pt, 'walk'], [b, '09:00', pt, 'wheel'], [c, '09:30', ex, 'bed'], [d, '09:30', pt, 'walk'],
     [e, '10:00', ot, 'wheel'], [f, '10:30', pt, 'walk'], [g, '10:30', xr, 'bed', false], [h, '11:00', ex, 'wheel'],
