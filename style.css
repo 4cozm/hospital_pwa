@@ -193,3 +193,14 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .f .pills{display:flex;margin-bottom:8px}
 .f .pills:empty{display:none}
 .pill .x{border:0;background:var(--brand);color:var(--brand-ink);width:22px;height:22px;border-radius:50%;font-size:15px;line-height:1;margin-left:4px;padding:0}
+
+/* 시간/날짜 입력: iOS Safari 등은 기본 모양(appearance)이 width:100%를 무시하고 자체 너비로 그려
+   모달 밖으로 나가므로, 기본 모양을 걷어내고 크기를 직접 지정 */
+.f input[type=time],.f input[type=date]{
+  -webkit-appearance:none;appearance:none;display:block;
+  width:100%;min-width:0;max-width:100%;min-height:50px;margin:0;text-align:left;
+}
+.f input[type=time]::-webkit-date-and-time-value,.f input[type=date]::-webkit-date-and-time-value{
+  text-align:left;min-height:1.4em;margin:0;
+}
+.f input[type=time]::-webkit-datetime-edit,.f input[type=date]::-webkit-datetime-edit{padding:0}

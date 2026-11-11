@@ -358,7 +358,7 @@ function noPatientSheet() {
 }
 /* 환자 선택: 호수 → 그 병실의 환자 (기본값 없음, 목록이 길어지지 않게 2단계) */
 function patientOptions(room, sel) {
-  if (!room) return '<select name="pid" disabled><option>호수를 먼저 선택하세요</option></select>';
+  if (!room) return '<select name="pid" disabled><option>호수 먼저</option></select>';
   const ps = db.patients.filter(p => p.room === room).sort((a, b) => a.bed - b.bed);
   const auto = ps.length === 1 && roomOf(room).cap === 1;     // 1인실은 환자가 한 명뿐이라 자동 선택
   return `<select name="pid" required>${sel || auto ? '' : '<option value="">환자 선택</option>'}${ps.map(p =>
