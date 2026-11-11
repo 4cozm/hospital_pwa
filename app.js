@@ -312,24 +312,32 @@ function patientForm(p, presetRoom) {
   sheet.dataset.pid = p.id || '';
 }
 
+function noPatientSheet() {
+  openSheet(`<h2>등록된 환자가 없습니다</h2>
+    <p class="note">일정은 병실에 등록된 환자에게만 추가할 수 있습니다. 병실 탭에서 환자를 먼저 배정하세요.</p>
+    <div class="acts"><button data-act="close">닫기</button><button class="pri" data-act="goRooms">병실로 이동</button></div>`);
+}
+/* 환자 선택: 기본값 없이 비워 두어 엉뚱한 환자에 저장되는 실수를 막는다 */
+function patientSelect(sel, blank) {
+  const ps = [...db.patients].sort((a, b) => a.room - b.room || a.name.localeCompare(b.name, 'ko'));
+  return `<select name="pid" required>${blank ? '<option value="">환자를 선택하세요</option>' : ''}${ps.map(p => `<option value="${p.id}" ${p.id === sel ? 'selected' : ''}>${p.room}호 ${esc(p.name)}</option>`).join('')}</select>`;
+}
 function lastMob(pid) {
   const l = db.entries.filter(x => x.pid === pid).pop();
   return l ? mobOf(l) : 'walk';
 }
 function entryForm(e, presetPid) {
-  if (!db.patients.length) { toast('먼저 환자를 추가하세요', ''); patientForm(); return; }
+  if (!db.patients.length) return noPatientSheet();
   if (!db.cats.length) {
     openSheet(`<h2>치료 종류가 없습니다</h2><p class="note">"3층 PT" 같은 치료 종류를 먼저 추가하세요. (설정 탭에서도 관리할 수 있습니다)</p>
       <div class="acts"><button data-act="close">닫기</button><button class="pri" data-act="addCat">＋ 치료 종류 추가</button></div>`);
     return;
   }
   const isNew = !e;
-  const first = presetPid || db.patients[0].id;
-  e = e || { pid: first, time: nextSlot(), tid: db.cats[0].id, mob: lastMob(first), daily: false, memo: '' };
-  const ps = [...db.patients].sort((a, b) => a.room - b.room);
+  e = e || { pid: presetPid || '', time: nextSlot(), tid: db.cats[0].id, mob: presetPid ? lastMob(presetPid) : 'walk', daily: false, memo: '' };
   openSheet(`<h2>${isNew ? '일정 추가' : '일정 수정'} · ${fmtDate(e.date || date)}</h2>
   <form id="ef">
-    <div class="f"><label>환자</label><select name="pid">${ps.map(p => `<option value="${p.id}" ${p.id === e.pid ? 'selected' : ''}>${p.room}호 ${esc(p.name)}</option>`).join('')}</select></div>
+    <div class="f"><label>환자 (병실에 등록된 환자만)</label>${patientSelect(e.pid, isNew && !e.pid)}</div>
     <div class="f"><label>이동 방식</label><div class="seg">
       ${Object.entries(MOB).map(([k, v]) => `<label><input type="radio" name="mob" value="${k}" ${mobOf(e) === k ? 'checked' : ''}><span class="${k}">${v.label}</span></label>`).join('')}
     </div></div>
@@ -349,11 +357,13 @@ function entryForm(e, presetPid) {
   </form>`);
   sheet.dataset.eid = e.id || '';
   if (isNew) $('#ef [name=pid]').onchange = ev => {   // 환자를 바꾸면 그 환자의 지난 이동 방식을 기본값으로
+    if (!ev.target.value) return;
     const r = $(`#ef [name=mob][value=${lastMob(ev.target.value)}]`); if (r) r.checked = true;
   };
   $('#ef').onsubmit = ev => {
     ev.preventDefault();
     const f = new FormData(ev.target);
+    if (!patient(f.get('pid'))) return toast('병실에 등록된 환자를 선택하세요', '');
     const data = { pid: f.get('pid'), date: f.get('date'), time: f.get('time'), tid: f.get('tid'), mob: f.get('mob'), memo: f.get('memo').trim(), daily: f.get('daily') === 'on' };
     if (isNew) db.entries.push({ id: uid(), ...data }); else Object.assign(e, data);
     date = data.date; save(); closeSheet(); render();
@@ -380,13 +390,12 @@ function catForm(c) {
   };
 }
 function sxForm(e, presetPid) {
-  if (!db.patients.length) { toast('먼저 환자를 추가하세요', ''); patientForm(); return; }
+  if (!db.patients.length) return noPatientSheet();
   const isNew = !e;
-  e = e || { kind: 'sx', pid: presetPid || db.patients[0].id, date, time: '08:00', name: '', mob: 'bed', memo: '' };
-  const ps = [...db.patients].sort((a, b) => a.room - b.room);
+  e = e || { kind: 'sx', pid: presetPid || '', date, time: '08:00', name: '', mob: 'bed', memo: '' };
   openSheet(`<h2>${isNew ? '수술 일정 추가' : '수술 일정 수정'}</h2>
   <form id="sf">
-    <div class="f"><label>환자</label><select name="pid">${ps.map(p => `<option value="${p.id}" ${p.id === e.pid ? 'selected' : ''}>${p.room}호 ${esc(p.name)}</option>`).join('')}</select></div>
+    <div class="f"><label>환자 (병실에 등록된 환자만)</label>${patientSelect(e.pid, isNew && !e.pid)}</div>
     <div class="row">
       <div class="f"><label>날짜</label><input type="date" name="date" value="${e.date}" required></div>
       <div class="f"><label>시간</label><input type="time" name="time" value="${e.time}" required></div>
@@ -405,6 +414,7 @@ function sxForm(e, presetPid) {
   $('#sf').onsubmit = ev => {
     ev.preventDefault();
     const f = new FormData(ev.target);
+    if (!patient(f.get('pid'))) return toast('병실에 등록된 환자를 선택하세요', '');
     const data = { kind: 'sx', pid: f.get('pid'), date: f.get('date'), time: f.get('time'), name: f.get('name').trim(), mob: f.get('mob'), memo: f.get('memo').trim() };
     if (isNew) db.surgeries.push({ id: uid(), ...data }); else Object.assign(e, data);
     date = data.date; save(); closeSheet(); render();
@@ -453,6 +463,7 @@ document.addEventListener('click', ev => {
     }
     case 'room': roomSheet(Number(t.dataset.no)); break;
     case 'close': closeSheet(); break;
+    case 'goRooms': closeSheet(); tab = 'rooms'; render(); scrollTo(0, 0); break;
     case 'pill': pillSheet(entry()); break;
     case 'addCat': catForm(); break;
     case 'editCat': catForm(db.cats.find(c => c.id === id)); break;
