@@ -13,6 +13,7 @@ const MOB = {
   bed:   { label: '베드',   escort: true },
 };
 const KEY = 'ward-schedule-v1';
+const NEW_CAT = '__new__';
 
 /* ================= 저장소 (localStorage 전용) ================= */
 function uid() { return Math.random().toString(36).slice(2, 10); }
@@ -328,13 +329,8 @@ function lastMob(pid) {
 }
 function entryForm(e, presetPid) {
   if (!db.patients.length) return noPatientSheet();
-  if (!db.cats.length) {
-    openSheet(`<h2>치료 종류가 없습니다</h2><p class="note">"3층 PT" 같은 치료 종류를 먼저 추가하세요. (설정 탭에서도 관리할 수 있습니다)</p>
-      <div class="acts"><button data-act="close">닫기</button><button class="pri" data-act="addCat">＋ 치료 종류 추가</button></div>`);
-    return;
-  }
   const isNew = !e;
-  e = e || { pid: presetPid || '', time: nextSlot(), tid: db.cats[0].id, mob: presetPid ? lastMob(presetPid) : 'walk', daily: false, memo: '' };
+  e = e || { pid: presetPid || '', time: nextSlot(), tid: db.cats.length ? '' : NEW_CAT, mob: presetPid ? lastMob(presetPid) : 'walk', daily: false, memo: '' };
   openSheet(`<h2>${isNew ? '일정 추가' : '일정 수정'} · ${fmtDate(e.date || date)}</h2>
   <form id="ef">
     <div class="f"><label>환자 (병실에 등록된 환자만)</label>${patientSelect(e.pid, isNew && !e.pid)}</div>
@@ -345,9 +341,17 @@ function entryForm(e, presetPid) {
       <div class="f"><label>날짜${e.daily ? ' (시작일)' : ''}</label><input type="date" name="date" value="${e.date || date}" required></div>
       <div class="f"><label>시간</label><input type="time" name="time" value="${e.time}" required></div>
     </div>
-    <div class="f"><label>치료</label><div class="catpick">
-      ${db.cats.map(c => `<label><input type="radio" name="tid" value="${c.id}" ${c.id === e.tid ? 'checked' : ''}><span>${esc(c.label)}</span></label>`).join('')}
-    </div></div>
+    <div class="f"><label>치료 (시술)</label>
+      <select name="tid" required>
+        ${isNew && !e.tid ? '<option value="">치료를 선택하세요</option>' : ''}
+        ${db.cats.map(c => `<option value="${c.id}" ${c.id === e.tid ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}
+        <option value="${NEW_CAT}" ${e.tid === NEW_CAT ? 'selected' : ''}>＋ 새 치료 종류 추가…</option>
+      </select>
+      <div id="newcat" class="newcat" ${e.tid === NEW_CAT ? '' : 'hidden'}>
+        <input name="ncl" placeholder="표시 이름 (예: 3층 PT)" autocomplete="off">
+        <input name="ncm" placeholder="상세 메모 (예: 3층 쭉 들어가서 좌측)" autocomplete="off">
+      </div>
+    </div>
     <div class="f"><label>일정 메모 (선택)</label><input name="memo" value="${esc(e.memo)}" autocomplete="off"></div>
     <div class="f"><label class="chk"><input type="checkbox" name="daily" ${e.daily ? 'checked' : ''}> 이 날짜부터 매일 반복</label></div>
     <div class="acts">
@@ -360,11 +364,25 @@ function entryForm(e, presetPid) {
     if (!ev.target.value) return;
     const r = $(`#ef [name=mob][value=${lastMob(ev.target.value)}]`); if (r) r.checked = true;
   };
+  const syncNew = () => {
+    const on = $('#ef [name=tid]').value === NEW_CAT;
+    $('#newcat').hidden = !on; $('#ef [name=ncl]').required = on;
+    if (on) $('#ef [name=ncl]').focus();
+  };
+  $('#ef [name=tid]').onchange = syncNew;
+  $('#ef [name=ncl]').required = e.tid === NEW_CAT;
   $('#ef').onsubmit = ev => {
     ev.preventDefault();
     const f = new FormData(ev.target);
     if (!patient(f.get('pid'))) return toast('병실에 등록된 환자를 선택하세요', '');
-    const data = { pid: f.get('pid'), date: f.get('date'), time: f.get('time'), tid: f.get('tid'), mob: f.get('mob'), memo: f.get('memo').trim(), daily: f.get('daily') === 'on' };
+    let tid = f.get('tid');
+    if (tid === NEW_CAT) {   // 그 자리에서 새 치료 종류 생성 (같은 이름이 있으면 재사용)
+      const label = f.get('ncl').trim(); if (!label) return;
+      let c = db.cats.find(c => c.label === label);
+      if (!c) db.cats.push(c = { id: uid(), label, memo: f.get('ncm').trim() });
+      tid = c.id;
+    }
+    const data = { pid: f.get('pid'), date: f.get('date'), time: f.get('time'), tid, mob: f.get('mob'), memo: f.get('memo').trim(), daily: f.get('daily') === 'on' };
     if (isNew) db.entries.push({ id: uid(), ...data }); else Object.assign(e, data);
     date = data.date; save(); closeSheet(); render();
   };

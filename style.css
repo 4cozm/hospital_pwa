@@ -180,3 +180,6 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .pill.sx{border-color:#7c3aed;color:#7c3aed}
 .pl.row-edit{align-items:flex-start}
 @media (prefers-color-scheme:dark){.badge.sx{background:#2e1b4d;color:#c4a1ff}.pill.sx{border-color:#c4a1ff;color:#c4a1ff}}
+
+.newcat{display:grid;gap:8px;margin-top:8px}
+.newcat[hidden]{display:none}
