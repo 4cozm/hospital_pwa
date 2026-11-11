@@ -358,7 +358,7 @@ function noPatientSheet() {
 }
 /* 환자 선택: 호수 → 그 병실의 환자 (기본값 없음, 목록이 길어지지 않게 2단계) */
 function patientOptions(room, sel) {
-  if (!room) return '<select name="pid" disabled><option>호수를 먼저 선택하세요</option></select>';
+  if (!room) return '<select name="pid" disabled><option>호수 먼저</option></select>';
   const ps = db.patients.filter(p => p.room === room).sort((a, b) => a.bed - b.bed);
   const auto = ps.length === 1 && roomOf(room).cap === 1;     // 1인실은 환자가 한 명뿐이라 자동 선택
   return `<select name="pid" required>${sel || auto ? '' : '<option value="">환자 선택</option>'}${ps.map(p =>
@@ -402,7 +402,7 @@ function entryForm(e, presetPid) {
   if (!db.patients.length) return noPatientSheet();
   if (!db.cats.length) return noCatSheet();
   const isNew = !e;
-  e = e || { pid: presetPid || '', time: nextSlot(), tids: [], mob: presetPid ? lastMob(presetPid) : 'walk', daily: false, memo: '' };
+  e = e || { pid: presetPid || '', time: currentTime(), tids: [], mob: presetPid ? lastMob(presetPid) : 'walk', daily: false, memo: '' };
   openSheet(`<h2>${isNew ? `치료 일정 추가 · 오늘 ${fmtDate(todayStr())}` : '치료 일정 수정'}</h2>
   <form id="ef">
     ${pickerHtml(e.pid)}
@@ -499,9 +499,9 @@ function pillSheet(e, cid) {
     ${!isSx(e) && e.memo ? `<p class="note">일정 메모: ${esc(e.memo)}</p>` : ''}
     <div class="acts"><button data-act="close">닫기</button>${c ? `<button data-act="editCat" data-id="${c.id}">장소 메모 수정</button>` : ''}</div>`);
 }
-function nextSlot() { // 현재 시각 이후 가장 가까운 30분 단위
-  const m = Math.ceil((nowMin() + 1) / 30) * 30;
-  return `${pad(Math.min(23, Math.floor(m / 60)))}:${pad(m % 60 % 60)}`;
+function currentTime() { // 입력 기본값: 지금 시각 (HH:MM, 24시간)
+  const d = new Date();
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function roomSheet(no) {
