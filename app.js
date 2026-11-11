@@ -31,13 +31,15 @@ function migrate(d) {
   const P = id => d.patients.find(p => p.id === id);
   for (const e of d.entries) {
     if (!e.mob) e.mob = P(e.pid)?.mob || 'walk';
-    if (!e.tid) {
+    if (!e.tid && !Array.isArray(e.tids)) {
       const label = (e.tx || '').trim() || '미지정';
       let c = d.cats.find(c => c.label === label);
       if (!c) d.cats.push(c = { id: uid(), label, memo: '' });
       e.tid = c.id;
     }
     delete e.tx;
+    if (!Array.isArray(e.tids)) e.tids = e.tid ? [e.tid] : [];   // v4: 일정 하나에 시술 여러 개
+    delete e.tid;
   }
   d.patients.forEach(p => delete p.mob);
   for (const p of d.patients) {           // v3: 병실 내 자리 번호(bed). 없으면 빈 번호부터 순서대로
@@ -71,10 +73,17 @@ const patientAt = (room, bed, exceptId) => db.patients.find(p => p.room === room
 const bedLabel = p => (roomOf(p.room)?.cap > 1 && p.bed ? `${p.bed}번` : '');
 const mobOf = e => (MOB[e.mob] ? e.mob : 'walk');
 const isSx = e => e.kind === 'sx';
-const catOf = e => isSx(e) ? null : db.cats.find(c => c.id === e.tid);
-const txLabel = e => isSx(e) ? `수술 ${e.name}` : (catOf(e)?.label || '(치료 미지정)');
-const memoOf = e => isSx(e) ? e.memo : catOf(e)?.memo;
-const txPill = (e, tag = 'button') => `<${tag} class="pill ${isSx(e) ? 'sx' : ''}" ${tag === 'button' ? `data-act="pill" data-id="${e.id}"` : ''}>${esc(txLabel(e))}${memoOf(e) ? ' <i>ⓘ</i>' : ''}</${tag}>`;
+const catsOf = e => isSx(e) ? [] : (e.tids || []).map(id => db.cats.find(c => c.id === id)).filter(Boolean);
+const txLabel = e => isSx(e) ? `수술 ${e.name}` : (catsOf(e).map(c => c.label).join(' + ') || '(치료 미지정)');
+const memoOf = e => isSx(e) ? e.memo : catsOf(e).filter(c => c.memo).map(c => catsOf(e).length > 1 ? `${c.label}: ${c.memo}` : c.memo).join('\n');
+/* 시술마다 필 하나. 눌러서 그 시술의 장소 메모 확인 */
+const txPill = (e, tag = 'button') => {
+  const attr = (extra = '') => tag === 'button' ? `data-act="pill" data-id="${e.id}" ${extra}` : '';
+  const one = (label, memo, cls, extra) => `<${tag} class="pill ${cls}" ${attr(extra)}>${esc(label)}${memo ? ' <i>ⓘ</i>' : ''}</${tag}>`;
+  if (isSx(e)) return `<span class="pills">${one(txLabel(e), e.memo, 'sx', '')}</span>`;
+  const cs = catsOf(e);
+  return `<span class="pills">${cs.map(c => one(c.label, c.memo, '', `data-cid="${c.id}"`)).join('') || '<span class="note">(시술 미지정)</span>'}</span>`;
+};
 const findItem = id => db.entries.find(e => e.id === id) || db.surgeries.find(e => e.id === id);
 
 let tab = 'today';
@@ -381,19 +390,25 @@ function lastMob(pid) {
   const l = db.entries.filter(x => x.pid === pid).pop();
   return l ? mobOf(l) : 'walk';
 }
+let txSel = [];
+function renderTxPicker() {
+  const chips = $('#txchips'), pick = $('#txpick'); if (!chips || !pick) return;
+  chips.innerHTML = txSel.map(id => `<span class="pill">${esc(db.cats.find(c => c.id === id).label)} <button type="button" class="x" data-act="rmTx" data-cid="${id}" aria-label="제거">×</button></span>`).join('');
+  const rest = db.cats.filter(c => !txSel.includes(c.id));
+  pick.innerHTML = `<option value="">${rest.length ? (txSel.length ? '＋ 시술 더 추가' : '시술을 선택하세요') : '모든 시술이 선택됨'}</option>` + rest.map(c => `<option value="${c.id}">${esc(c.label)}</option>`).join('');
+  pick.disabled = !rest.length;
+}
 function entryForm(e, presetPid) {
   if (!db.patients.length) return noPatientSheet();
   if (!db.cats.length) return noCatSheet();
   const isNew = !e;
-  e = e || { pid: presetPid || '', time: nextSlot(), tid: '', mob: presetPid ? lastMob(presetPid) : 'walk', daily: false, memo: '' };
+  e = e || { pid: presetPid || '', time: nextSlot(), tids: [], mob: presetPid ? lastMob(presetPid) : 'walk', daily: false, memo: '' };
   openSheet(`<h2>${isNew ? `치료 일정 추가 · 오늘 ${fmtDate(todayStr())}` : '치료 일정 수정'}</h2>
   <form id="ef">
     ${pickerHtml(e.pid)}
-    <div class="f"><label>치료 시술</label>
-      <select name="tid" required>
-        ${e.tid ? '' : '<option value="">시술을 선택하세요</option>'}
-        ${db.cats.map(c => `<option value="${c.id}" ${c.id === e.tid ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}
-      </select></div>
+    <div class="f"><label>치료 시술 (같은 시간에 여러 개 선택 가능)</label>
+      <div id="txchips" class="pills"></div>
+      <select id="txpick"></select></div>
     <div class="f"><label>이동 방식</label><div class="seg">
       ${Object.entries(MOB).map(([k, v]) => `<label><input type="radio" name="mob" value="${k}" ${mobOf(e) === k ? 'checked' : ''}><span class="${k}">${v.label}</span></label>`).join('')}
     </div></div>
@@ -406,6 +421,9 @@ function entryForm(e, presetPid) {
       <button class="pri">저장</button></div>
   </form>`);
   sheet.dataset.eid = e.id || '';
+  txSel = (e.tids || []).filter(id => db.cats.some(c => c.id === id));
+  renderTxPicker();
+  $('#txpick').onchange = ev => { if (ev.target.value) { txSel.push(ev.target.value); renderTxPicker(); } };
   bindPicker(isNew ? pid => {   // 환자를 고르면 그 환자의 지난 이동 방식을 기본값으로
     const r = $(`#ef [name=mob][value=${lastMob(pid)}]`); if (r) r.checked = true;
   } : null);
@@ -413,8 +431,8 @@ function entryForm(e, presetPid) {
     ev.preventDefault();
     const f = new FormData(ev.target);
     if (!patient(f.get('pid'))) return toast('병실에 등록된 환자를 선택하세요', '');
-    if (!db.cats.some(c => c.id === f.get('tid'))) return toast('등록된 치료 시술을 선택하세요', '');
-    const data = { pid: f.get('pid'), time: f.get('time'), tid: f.get('tid'), mob: f.get('mob'), memo: f.get('memo').trim(), daily: f.get('daily') === 'on' };
+    if (!txSel.length) return toast('치료 시술을 하나 이상 선택하세요', '');
+    const data = { pid: f.get('pid'), time: f.get('time'), tids: [...txSel], mob: f.get('mob'), memo: f.get('memo').trim(), daily: f.get('daily') === 'on' };
     if (isNew) db.entries.push({ id: uid(), date: todayStr(), ...data }); else Object.assign(e, data);   // 날짜는 항상 오늘
     save(); closeSheet(); render();
   };
@@ -471,12 +489,15 @@ function sxForm(e, presetPid) {
     date = data.date; save(); closeSheet(); render();
   };
 }
-function pillSheet(e) {
-  const c = catOf(e), memo = memoOf(e);
-  openSheet(`<h2>${esc(txLabel(e))}</h2>
-    ${memo ? `<p style="font-size:20px;line-height:1.5;margin:0 0 8px;white-space:pre-wrap">${esc(memo)}</p>` : `<p class="note">상세 메모가 없습니다. ${isSx(e) ? '수술일정에서' : '설정에서'} 추가할 수 있습니다.</p>`}
+function pillSheet(e, cid) {
+  const c = isSx(e) ? null : db.cats.find(x => x.id === cid) || catsOf(e)[0];
+  const title = isSx(e) ? txLabel(e) : (c?.label || '(시술 없음)'), memo = isSx(e) ? e.memo : c?.memo;
+  const others = isSx(e) ? [] : catsOf(e).filter(x => x !== c);
+  openSheet(`<h2>${esc(title)}</h2>
+    ${memo ? `<p style="font-size:20px;line-height:1.5;margin:0 0 8px;white-space:pre-wrap">${esc(memo)}</p>` : `<p class="note">장소 메모가 없습니다. ${isSx(e) ? '수술일정에서' : '설정의 치료 시술에서'} 추가할 수 있습니다.</p>`}
+    ${others.length ? `<p class="note">같은 일정의 다른 시술: ${others.map(x => esc(x.label)).join(', ')}</p>` : ''}
     ${!isSx(e) && e.memo ? `<p class="note">일정 메모: ${esc(e.memo)}</p>` : ''}
-    <div class="acts"><button data-act="close">닫기</button>${c ? `<button data-act="editCat" data-id="${c.id}">메모 수정</button>` : ''}</div>`);
+    <div class="acts"><button data-act="close">닫기</button>${c ? `<button data-act="editCat" data-id="${c.id}">장소 메모 수정</button>` : ''}</div>`);
 }
 function nextSlot() { // 현재 시각 이후 가장 가까운 30분 단위
   const m = Math.ceil((nowMin() + 1) / 30) * 30;
@@ -519,13 +540,17 @@ document.addEventListener('click', ev => {
     case 'close': closeSheet(); break;
     case 'goSettings': closeSheet(); tab = 'settings'; render(); scrollTo(0, 0); break;
     case 'goRooms': closeSheet(); tab = 'rooms'; render(); scrollTo(0, 0); break;
-    case 'pill': pillSheet(entry()); break;
+    case 'pill': pillSheet(entry(), t.dataset.cid); break;
+    case 'rmTx': txSel = txSel.filter(x => x !== t.dataset.cid); renderTxPicker(); break;
     case 'addCat': catForm(); break;
     case 'editCat': catForm(db.cats.find(c => c.id === id)); break;
     case 'delCat': {
-      const cid = sheet.dataset.cid, n = db.entries.filter(e => e.tid === cid).length;
-      if (confirm(n ? `이 시술을 쓰는 일정 ${n}개도 함께 삭제됩니다. 삭제할까요?` : '이 시술을 삭제할까요?')) {
-        db.cats = db.cats.filter(c => c.id !== cid); db.entries = db.entries.filter(e => e.tid !== cid); save(); closeSheet(); render();
+      const cid = sheet.dataset.cid, hit = db.entries.filter(e => e.tids.includes(cid)), gone = hit.filter(e => e.tids.length === 1).length;
+      const msg = hit.length ? `이 시술이 들어간 일정 ${hit.length}개에서 제거됩니다.${gone ? ` (이 시술뿐인 ${gone}개는 일정이 삭제됩니다)` : ''} 삭제할까요?` : '이 시술을 삭제할까요?';
+      if (confirm(msg)) {
+        db.cats = db.cats.filter(c => c.id !== cid);
+        db.entries.forEach(e => { e.tids = e.tids.filter(x => x !== cid); });
+        db.entries = db.entries.filter(e => e.tids.length); save(); closeSheet(); render();
       }
       break;
     }
@@ -626,8 +651,8 @@ function demo() {
   const P = (name, room, bed, note = '') => { const p = { id: uid(), name, room, bed, note }; db.patients.push(p); return p.id; };
   const a = P('김영수', 1, 1), b = P('박순자', 1, 3, '낙상 주의'), c = P('이철민', 2, 1, '우측 편마비'), d = P('최미숙', 5, 4),
     e = P('정대호', 7, 2), f = P('한지원', 12, 1), g = P('오세훈', 15, 1), h = P('윤정자', 19, 1), i = P('강민수', 19, 2);
-  const E = (pid, time, tid, mob, daily = true) => db.entries.push({ id: uid(), pid, date, time, tid, mob, daily, memo: '' });
-  [[a, '09:00', pt, 'walk'], [b, '09:00', pt, 'wheel'], [c, '09:30', ex, 'bed'], [d, '09:30', pt, 'walk'],
+  const E = (pid, time, tid, mob, daily = true) => db.entries.push({ id: uid(), pid, date, time, tids: [].concat(tid), mob, daily, memo: '' });
+  [[a, '09:00', [pt, ot], 'walk'], [b, '09:00', pt, 'wheel'], [c, '09:30', ex, 'bed'], [d, '09:30', pt, 'walk'],
     [e, '10:00', ot, 'wheel'], [f, '10:30', pt, 'walk'], [g, '10:30', xr, 'bed', false], [h, '11:00', ex, 'wheel'],
     [i, '11:00', pt, 'walk'], [a, '14:00', ot, 'walk'], [c, '15:00', pt, 'bed']].forEach(x => E(...x));
   db.surgeries.push({ id: uid(), kind: 'sx', pid: c, date, time: '13:00', name: '무릎 인공관절', mob: 'bed', memo: '금식 확인, 수술실 3번' });
