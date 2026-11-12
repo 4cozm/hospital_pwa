@@ -235,3 +235,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .away b{font-size:21px;color:var(--ink)}
 .hero .away,.hero .away b{color:#fff}
 .hero .away{margin:2px 0 10px}
+
+/* 맨 위 카드와 시간표 사이 구분선 */
+.divider{display:flex;align-items:center;gap:10px;margin:22px 2px 14px;color:var(--sub);font-size:13px;font-weight:800}
+.divider::before,.divider::after{content:"";flex:1;border-top:2px solid var(--line)}

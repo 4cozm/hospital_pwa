@@ -197,19 +197,20 @@ function renderToday() {
   const pending = list.filter(e => stOf(e, date) !== 2);
   const next = isToday ? (pending.find(e => stOf(e, date) === 1) || pending.find(e => tmin(e.time) + 20 >= now) || pending[0]) : null;
 
-  if (isToday && total) {
-    if (!next) html += `<div class="hero empty">오늘 일정 모두 완료 🎉</div>`;
-    else html += hero(next);
-  }
+  // 맨 위 카드로 뽑힌 항목은 아래 시간표에서 잠시 숨겨 중복을 피한다 (끝나면 시간표에 완료 상태로 돌아옴)
+  const rest = next ? list.filter(e => e.id !== next.id) : list;
+  const showHero = isToday && total > 0;
+  if (showHero) html += next ? hero(next) : `<div class="hero empty">오늘 일정 모두 완료 🎉</div>`;
+  if (showHero && rest.length) html += `<div class="divider"><span>시간표</span></div>`;
 
   if (!total) {
     html += `<div class="empty-msg">이 날짜에 일정이 없습니다.<br>
       <button class="btn pri" data-tab="tx">치료일정에서 입력하기</button>
       ${db.patients.length ? '' : '<br><button class="btn" data-act="demo">예시 데이터 불러오기</button>'}</div>`;
   } else {
-    const times = [...new Set(list.map(e => e.time))];
+    const times = [...new Set(rest.map(e => e.time))];
     for (const t of times) {
-      const g = list.filter(e => e.time === t);
+      const g = rest.filter(e => e.time === t);
       const open = g.filter(e => stOf(e, date) !== 2);
       const late = isToday && open.length && tmin(t) < now;
       const cur = isToday && open.length && tmin(t) >= now && tmin(t) - now <= 30;
