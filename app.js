@@ -111,6 +111,7 @@ function render() {
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   $('#fab').classList.toggle('hide', tab === 'settings' || tab === 'today');
   $('#fab').setAttribute('aria-label', { tx: '치료 일정 추가', sx: '수술 일정 추가', rooms: '환자 추가' }[tab] || '추가');
+  if (tab !== 'rooms') roomQuery = '';
   ({ today: renderToday, tx: renderTx, sx: renderSx, rooms: renderRooms, settings: renderSettings })[tab]();
 }
 
@@ -209,19 +210,37 @@ function card(e, late) {
   </article>`;
 }
 
+let roomQuery = '';
+/* 병실 검색: 입력할 때 화면을 다시 그리지 않고(포커스 유지) 결과 목록·카드 강조만 갱신 */
+function applyRoomFilter() {
+  const q = roomQuery.trim(), res = $('#rres'); if (!res) return;
+  const hits = q ? db.patients.filter(p => nameMatch(p.name, q)).sort((a, b) => a.room - b.room || a.bed - b.bed) : [];
+  const ids = new Set(hits.map(p => p.id));
+  res.innerHTML = !q ? '' : hits.length
+    ? `<div class="sec">검색 결과 ${hits.length}명 · 누르면 병실이 열립니다</div>` + hits.slice(0, 10).map(p =>
+        `<button class="pl" data-act="room" data-no="${p.room}">${roomBox(p)}<div><div class="who"><span class="n">${esc(p.name)}</span></div>${p.note ? `<div class="note">${esc(p.note)}</div>` : ''}</div></button>`).join('')
+    : '<div class="empty-msg" style="padding:14px">일치하는 환자가 없습니다</div>';
+  document.querySelectorAll('#view .slot[data-pid]').forEach(el => el.classList.toggle('hit', ids.has(el.dataset.pid)));
+  document.querySelectorAll('#view .rc').forEach(el => el.classList.toggle('dim', !!q && !el.querySelector('.slot.hit')));
+}
 function renderRooms() {
   $('#top').innerHTML = `<div class="hrow"><h1>병실 현황</h1></div>
-    <div class="sum"><span>입원 <b>${db.patients.length}</b>명</span></div>`;
+    <div class="sum"><span>입원 <b>${db.patients.length}</b>명</span></div>
+    <input id="rsearch" class="sbox" type="search" enterkeyhint="search" placeholder="환자 이름 검색 (일부 또는 초성: 김영, ㄱㅇㅅ)" autocomplete="off" value="${esc(roomQuery)}">`;
   const card_ = r => {
     const slots = Array.from({ length: r.cap }, (_, i) => {
       const pa = patientAt(r.no, i + 1), bn = r.cap > 1 ? `<span class="bn">${i + 1}</span>` : '';
-      return pa ? `<div class="slot">${bn}${esc(pa.name)}</div>` : `<div class="slot empty">${bn}빈 자리</div>`;
+      return pa ? `<div class="slot" data-pid="${pa.id}">${bn}${esc(pa.name)}</div>` : `<div class="slot empty">${bn}빈 자리</div>`;
     }).join('');
     return `<button class="rc ${r.vip ? 'vip' : ''}" data-act="room" data-no="${r.no}">
       <div class="rh"><b>${r.no}호</b><span>${r.code} · ${r.vip ? '특실' : '일반'} ${r.cap}인</span></div>${slots}</button>`;
   };
-  $('#view').innerHTML = `<div class="sec">일반실 (1~11호)</div><div class="rgrid">${ROOMS.filter(r => !r.vip).map(card_).join('')}</div>
+  $('#view').innerHTML = `<div id="rres"></div><div class="sec">일반실 (1~11호)</div><div class="rgrid">${ROOMS.filter(r => !r.vip).map(card_).join('')}</div>
     <div class="sec">특실 (12~19호)</div><div class="rgrid">${ROOMS.filter(r => r.vip).map(card_).join('')}</div>`;
+  const box = $('#rsearch');
+  box.oninput = () => { roomQuery = box.value; applyRoomFilter(); };
+  box.onkeydown = ev => { if (ev.key === 'Enter') { ev.preventDefault(); box.blur(); } };   // 키보드 닫기
+  applyRoomFilter();
 }
 
 function dateHdr(title, sum) {
