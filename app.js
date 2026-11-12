@@ -164,9 +164,10 @@ function render() {
 
 /* 이동 방식: 색 대신 '모시러 가야 하나'만 구분 (모시러=진한 칩, 혼자=외곽선 칩) */
 function mobBadge(k) { return `<span class="chip ${MOB[k].escort ? 'escort' : 'solo'}">${MOB[k].label}</span>`; }
+/* 호수-자리번호 요약 표기: 5호 1번 → 5-1 (1인실은 호수만) */
+const roomTag = p => (roomOf(p.room)?.cap > 1 && p.bed ? `${p.room}-${p.bed}` : String(p.room));
 function roomBox(p) {
-  const r = roomOf(p.room);
-  return `<div class="room ${r?.vip ? 'vip' : ''}"><b>${p.room}</b><small>호${r?.vip ? ' 특' : ''}${bedLabel(p) ? ' · ' + bedLabel(p) : ''}</small></div>`;
+  return `<div class="room ${roomOf(p.room)?.vip ? 'vip' : ''}"><b>${roomTag(p)}</b></div>`;
 }
 
 function renderToday() {
@@ -229,8 +230,8 @@ function hero(e) {
   const when = diff > 0 ? `${dur(diff)} 후` : diff === 0 ? '지금' : `${dur(-diff)} 지남`;
   return `<div class="hero">
     <div class="lab">${isSx(e) ? '수술 · ' : ''}${st === 1 ? (isSx(e) ? '진행 중' : '이송 중') : '다음 일정'} · ${when}</div>
-    <div class="big"><span class="t">${e.time}</span><span class="rm">${p.room}호</span><span class="nm">${esc(p.name)}</span></div>
-    <div class="meta">${bedLabel(p) ? bedLabel(p) + ' · ' : ''}${esc(txLabel(e))} · ${m.label}${p.note ? ' · ' + esc(p.note) : ''}</div>
+    <div class="big"><span class="t">${e.time}</span><span class="rm">${roomTag(p)}</span><span class="nm">${esc(p.name)}</span></div>
+    <div class="meta">${esc(txLabel(e))} · ${m.label}${p.note ? ' · ' + esc(p.note) : ''}</div>
     ${memoOf(e) ? `<div class="meta" style="font-size:18px;font-weight:700">→ ${esc(memoOf(e).replace(/\s*\n\s*/g, ' · '))}</div>` : ''}
     ${sxLine(e)}
     <div class="mini"><button class="go" data-act="adv" data-id="${e.id}">${advLabel(e, st)}</button></div>

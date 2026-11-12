@@ -70,7 +70,7 @@ main{padding:12px 16px;max-width:720px;margin:0 auto}
 .card.late:not(.done){outline:2px solid var(--late)}
 .room{grid-row:span 2;display:flex;flex-direction:column;align-items:center;justify-content:center;
   min-width:62px;border-radius:12px;background:var(--bg);padding:6px 4px}
-.room b{font-size:30px;line-height:1;font-weight:800}
+.room b{font-size:26px;line-height:1;font-weight:800;letter-spacing:-.5px;white-space:nowrap}
 .room small{font-size:11px;color:var(--sub)}
 .who{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .who .n{font-size:20px;font-weight:700}
