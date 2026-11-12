@@ -22,12 +22,14 @@ function load() {
     const d = JSON.parse(localStorage.getItem(KEY));
     if (d && d.patients && d.entries) return migrate({ status: {}, settings: { lead: 10 }, cats: [], surgeries: [], ...d });
   } catch (e) {}
-  return { patients: [], entries: [], status: {}, settings: { lead: 10 }, cats: [], surgeries: [] };
+  return { patients: [], entries: [], status: {}, settings: { lead: 10, firstUse: Date.now() }, cats: [], surgeries: [] };
 }
 /* v1 → v2: 이동방식은 환자가 아니라 일정(entry)의 속성, 치료는 카테고리(cats) 참조 */
 function migrate(d) {
   d.cats = d.cats || [];
   d.surgeries = d.surgeries || [];
+  d.settings = d.settings || { lead: 10 };
+  d.settings.firstUse = d.settings.firstUse || Date.now();   // 백업 안내 기준일
   const P = id => d.patients.find(p => p.id === id);
   for (const e of d.entries) {
     if (!e.mob) e.mob = P(e.pid)?.mob || 'walk';
@@ -52,8 +54,33 @@ function migrate(d) {
   return d;
 }
 function save() {
-  try { localStorage.setItem(KEY, JSON.stringify(db)); }
+  try { db.savedAt = Date.now(); localStorage.setItem(KEY, JSON.stringify(db)); }
   catch (e) { toast('저장 실패', '브라우저 저장공간이 가득 찼거나 차단되었습니다'); }
+}
+
+/* ================= 저장 상태 / 백업 ================= */
+const DAY = 864e5, BACKUP_EVERY_DAYS = 7;
+const fmtTs = ts => { if (!ts) return '없음'; const d = new Date(ts); return `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+function storageInfo() {
+  let chars = 0; try { chars = (localStorage.getItem(KEY) || '').length; } catch (e) {}
+  const kb = chars / 1024;
+  return { kb, text: kb < 1024 ? `${kb.toFixed(1)}KB` : `${(kb / 1024).toFixed(2)}MB`, pct: (chars / 5e6 * 100) };   // localStorage 한도 약 5M자 (브라우저별 상이)
+}
+/* 백업 안내: 환자가 있고, 마지막 백업(없으면 최초 사용일)에서 7일 이상 지났고, 오늘 "나중에"를 안 눌렀을 때 */
+function backupDue() {
+  if (!db.patients.length || db.settings.snooze === todayStr()) return null;
+  const base = db.settings.lastBackup || db.settings.firstUse || Date.now();
+  const days = Math.floor((Date.now() - base) / DAY);
+  return days >= BACKUP_EVERY_DAYS ? { days, never: !db.settings.lastBackup } : null;
+}
+function backupBanner() {
+  const due = backupDue(); if (!due) return '';
+  return `<div class="bk"><span>💾 ${due.never ? `백업한 적이 없습니다 (사용 ${due.days}일째)` : `마지막 백업 ${due.days}일 전`}</span>
+    <button data-act="export">지금 백업</button><button class="alt" data-act="snooze">나중에</button></div>`;
+}
+async function persistState() {
+  if (!navigator.storage?.persisted) return 'unsupported';
+  try { return (await navigator.storage.persisted()) ? 'granted' : 'default'; } catch (e) { return 'unsupported'; }
 }
 
 /* ================= 유틸 ================= */
@@ -143,7 +170,7 @@ function renderToday() {
       <span>모시러 <b>${esc_}</b></span><span>혼자 확인 <b>${solo}</b></span>
     </div>`;
 
-  let html = '';
+  let html = backupBanner();
   const now = nowMin();
   const pending = list.filter(e => stOf(e, date) !== 2);
   const next = isToday ? (pending.find(e => stOf(e, date) === 1) || pending.find(e => tmin(e.time) + 20 >= now) || pending[0]) : null;
@@ -283,7 +310,14 @@ function renderSx() {
 function renderSettings() {
   $('#top').innerHTML = `<div class="hrow"><h1>설정</h1></div>`;
   const perm = 'Notification' in window ? Notification.permission : 'unsupported';
+  const si = storageInfo();
   $('#view').innerHTML = `
+  <div class="set"><h3>저장 상태</h3>
+    <p>이 기기의 브라우저에만 저장됩니다. 서버로 전송되지 않습니다.</p>
+    <p>마지막 저장 <b>${fmtTs(db.savedAt)}</b> · 사용 <b>${si.text}</b> <span class="note">(한도 약 5MB 중 ${si.pct < 0.1 ? '0.1% 미만' : si.pct.toFixed(1) + '%'})</span></p>
+    <p>환자 <b>${db.patients.length}</b> · 치료 일정 <b>${db.entries.length}</b> · 수술 <b>${db.surgeries.length}</b> · 시술 <b>${db.cats.length}</b></p>
+    <p>영구 저장 <b id="persistState">확인 중…</b></p>
+    <button class="btn" data-act="persist">영구 저장 요청</button></div>
   <div class="set"><h3>치료 시술</h3>
     <p>치료일정에서는 여기에 등록한 시술만 선택할 수 있습니다. 시술 이름과 장소 메모를 미리 써두세요. 누르면 수정·삭제합니다.</p>
     ${db.cats.map(c => `<button class="pl" data-act="editCat" data-id="${c.id}"><div><div class="who"><span class="pill">${esc(c.label)}</span></div>
@@ -299,7 +333,7 @@ function renderSettings() {
     <p>${fmtDate(date)} 일정을 .ics 파일로 받아 폰 캘린더에 넣으면 OS가 알람을 울려줍니다.</p>
     <button class="btn" data-act="ics">${fmtDate(date)} 일정 내보내기</button></div>
   <div class="set"><h3>백업</h3>
-    <p>데이터는 이 기기의 브라우저에만 저장됩니다. 브라우저 데이터 삭제·기기 변경 시 사라지니 가끔 백업하세요.</p>
+    <p>브라우저 데이터 삭제·기기 변경 시 사라지니 ${BACKUP_EVERY_DAYS}일에 한 번은 백업하세요. 마지막 백업: <b>${db.settings.lastBackup ? fmtTs(db.settings.lastBackup) : '없음'}</b></p>
     <button class="btn" data-act="export">JSON 내보내기</button>
     <button class="btn" data-act="import">JSON 불러오기</button>
     <input type="file" id="file" accept="application/json" hidden></div>
@@ -307,6 +341,7 @@ function renderSettings() {
     <button class="btn" data-act="demo">예시 데이터 불러오기</button>
     <button class="btn danger" data-act="wipe">전체 삭제</button></div>
   <p class="note" style="text-align:center">환자 정보는 외부로 전송되지 않습니다 · 모든 데이터는 로컬 저장</p>`;
+  persistState().then(v => { const el = $('#persistState'); if (el) el.textContent = { granted: '허용됨 (브라우저가 임의로 지우지 않음)', default: '아직 허용되지 않음 (홈 화면에 추가하면 허용될 수 있음)', unsupported: '이 브라우저는 미지원' }[v]; });
   $('#lead').onchange = e => { db.settings.lead = Number(e.target.value); save(); };
   $('#file').onchange = importFile;
 }
@@ -620,7 +655,13 @@ document.addEventListener('click', ev => {
     }
     case 'perm': if ('Notification' in window) Notification.requestPermission().then(render); break;
     case 'ics': exportIcs(); break;
-    case 'export': download(`ward-backup-${todayStr()}.json`, 'application/json', JSON.stringify(db, null, 1)); break;
+    case 'export':
+      download(`ward-backup-${todayStr()}.json`, 'application/json', JSON.stringify(db, null, 1));
+      db.settings.lastBackup = Date.now(); save(); render(); toast('백업 파일을 저장했습니다', ''); break;
+    case 'snooze': db.settings.snooze = todayStr(); save(); render(); break;
+    case 'persist':
+      if (!navigator.storage?.persist) { toast('이 브라우저는 영구 저장을 지원하지 않습니다', ''); break; }
+      navigator.storage.persist().then(ok => { toast(ok ? '영구 저장이 허용되었습니다' : '브라우저가 허용하지 않았습니다', ok ? '' : '홈 화면에 추가해서 쓰면 허용될 수 있습니다'); render(); }); break;
     case 'import': $('#file').click(); break;
     case 'demo': demo(); break;
     case 'wipe':
@@ -707,6 +748,7 @@ function demo() {
 
 /* ================= 시작 ================= */
 render();
+try { navigator.storage?.persist?.(); } catch (e) {}   // 브라우저가 임의로 데이터를 지우지 못하도록 요청 (허용 여부는 브라우저 판단)
 setInterval(tick, 20000); tick();
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { tick(); if (tab === 'today') render(); } });
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
