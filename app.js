@@ -40,6 +40,7 @@ function migrate(d) {
     delete e.tx;
     if (!Array.isArray(e.tids)) e.tids = e.tid ? [e.tid] : [];   // v4: 일정 하나에 시술 여러 개
     delete e.tid;
+    delete e.daily;                       // v5: 매일 반복 기능 제거
   }
   d.patients.forEach(p => delete p.mob);
   for (const p of d.patients) {           // v3: 병실 내 자리 번호(bed). 없으면 빈 번호부터 순서대로
@@ -89,10 +90,10 @@ const findItem = id => db.entries.find(e => e.id === id) || db.surgeries.find(e 
 let tab = 'today';
 let date = todayStr();
 
-/* 해당 날짜의 일정. daily=true 인 항목은 시작일 이후 매일 표시 */
+/* 해당 날짜의 치료 일정 */
 function entriesOn(d) {
   return db.entries
-    .filter(e => patient(e.pid) && (e.daily ? e.date <= d : e.date === d))
+    .filter(e => patient(e.pid) && e.date === d)
     .sort((a, b) => tmin(a.time) - tmin(b.time) || roomNo(a) - roomNo(b));
 }
 /* 오늘 화면용: 치료 + 수술을 시간순으로 합친 목록 */
@@ -202,7 +203,7 @@ function card(e, late) {
   return `<article class="card ${mk} ${st === 2 ? 'done' : ''} ${late ? 'late' : ''}">
     ${roomBox(p)}
     <div class="who"><span class="n">${esc(p.name)}</span>${mobBadge(mk)}${badge}</div>
-    <div>${txPill(e)}${e.daily ? ' <span class="note">· 매일</span>' : ''}
+    <div>${txPill(e)}
       ${p.note || e.memo ? `<div class="note">${esc([p.note, e.memo].filter(Boolean).join(' · '))}</div>` : ''}</div>
     <div class="act">${btns}</div>
   </article>`;
@@ -239,7 +240,7 @@ function editRows(list, act) {
         const p = patient(e.pid);
         return `<button class="pl row-edit" data-act="${act}" data-id="${e.id}">${roomBox(p)}
           <div><div class="who"><span class="n">${esc(p.name)}</span>${mobBadge(mobOf(e))}</div>
-          <div>${txPill(e, 'span')}${e.daily ? ' <span class="note">· 매일</span>' : ''}</div>
+          <div>${txPill(e, 'span')}</div>
           ${e.memo ? `<div class="note">${esc(e.memo)}</div>` : ''}</div></button>`;
       }).join('')}</section>`;
   }
@@ -364,16 +365,43 @@ function patientOptions(room, sel) {
   return `<select name="pid" required>${sel || auto ? '' : '<option value="">환자 선택</option>'}${ps.map(p =>
     `<option value="${p.id}" ${p.id === sel || auto ? 'selected' : ''}>${bedLabel(p) ? bedLabel(p) + ' ' : ''}${esc(p.name)}</option>`).join('')}</select>`;
 }
+/* 이름 검색: 부분 일치 또는 초성 (예: '김영', 'ㄱㅇㅅ') */
+const CHO = 'ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ';
+const choOf = str => [...str].map(ch => { const c = ch.charCodeAt(0) - 0xAC00; return c >= 0 && c < 11172 ? CHO[Math.floor(c / 588)] : ch; }).join('');
+const nameMatch = (name, q) => { q = q.trim().toLowerCase(); return !!q && (name.toLowerCase().includes(q) || choOf(name).includes(q)); };
 function pickerHtml(selPid) {
   const room = patient(selPid)?.room || null;
   const rooms = ROOMS.filter(r => db.patients.some(p => p.room === r.no));
-  return `<div class="row">
+  return `<div class="f"><label>환자 이름 검색</label>
+    <input id="psearch" type="search" enterkeyhint="search" placeholder="이름 일부 또는 초성 (예: 김영, ㄱㅇㅅ)" autocomplete="off">
+    <div id="presults" class="presults"></div></div>
+  <div class="row">
     <div class="f"><label>호수</label><select name="room" required>${room ? '' : '<option value="">호수 선택</option>'}${rooms.map(r =>
       `<option value="${r.no}" ${r.no === room ? 'selected' : ''}>${r.no}호 (${db.patients.filter(p => p.room === r.no).length}명)</option>`).join('')}</select></div>
     <div class="f"><label>환자</label><div id="ppwrap">${patientOptions(room, selPid)}</div></div></div>`;
 }
 function bindPicker(onPick) {
   const bindPid = () => { const s = $('#sheet [name=pid]'); if (s) s.onchange = () => s.value && onPick?.(s.value); };
+  // --- 이름 검색: 결과를 눌러 선택 (입력만으로 자동 선택하지 않음)
+  const box = $('#psearch'), res = $('#presults');
+  const choose = pid => {
+    const p = patient(pid); if (!p) return;
+    $('#sheet [name=room]').value = String(p.room);
+    $('#ppwrap').innerHTML = patientOptions(p.room, pid); bindPid();
+    box.value = ''; res.innerHTML = ''; onPick?.(pid);
+  };
+  const find = () => db.patients.filter(p => nameMatch(p.name, box.value)).sort((a, b) => a.room - b.room || a.bed - b.bed);
+  box.oninput = () => {
+    const hits = find();
+    res.innerHTML = !box.value.trim() ? '' : hits.length
+      ? hits.slice(0, 8).map(p => `<button type="button" class="pr" data-pid="${p.id}">${p.room}호 ${bedLabel(p) ? bedLabel(p) + ' ' : ''}${esc(p.name)}</button>`).join('')
+      : '<span class="note">일치하는 환자가 없습니다</span>';
+  };
+  box.onkeydown = ev => {            // Enter로 폼이 저장되지 않게. 결과가 한 명뿐이면 그 환자 선택
+    if (ev.key !== 'Enter') return;
+    ev.preventDefault(); const hits = find(); if (hits.length === 1) choose(hits[0].id);
+  };
+  res.onclick = ev => { const b = ev.target.closest('.pr'); if (b) choose(b.dataset.pid); };
   $('#sheet [name=room]').onchange = ev => {
     $('#ppwrap').innerHTML = patientOptions(Number(ev.target.value) || null, null);
     bindPid();
@@ -402,7 +430,7 @@ function entryForm(e, presetPid) {
   if (!db.patients.length) return noPatientSheet();
   if (!db.cats.length) return noCatSheet();
   const isNew = !e;
-  e = e || { pid: presetPid || '', time: currentTime(), tids: [], mob: presetPid ? lastMob(presetPid) : 'walk', daily: false, memo: '' };
+  e = e || { pid: presetPid || '', time: currentTime(), tids: [], mob: presetPid ? lastMob(presetPid) : 'walk', memo: '' };
   openSheet(`<h2>${isNew ? `치료 일정 추가 · 오늘 ${fmtDate(todayStr())}` : '치료 일정 수정'}</h2>
   <form id="ef">
     ${pickerHtml(e.pid)}
@@ -414,7 +442,6 @@ function entryForm(e, presetPid) {
     </div></div>
     <div class="f"><label>시간</label><input type="time" name="time" value="${e.time}" required></div>
     <div class="f"><label>일정 메모 (선택)</label><input name="memo" value="${esc(e.memo)}" autocomplete="off"></div>
-    <div class="f"><label class="chk"><input type="checkbox" name="daily" ${e.daily ? 'checked' : ''}> 매일 반복</label></div>
     <div class="acts">
       ${isNew ? '' : '<button type="button" class="danger" data-act="delEntry">삭제</button>'}
       <button type="button" data-act="close">취소</button>
@@ -432,7 +459,7 @@ function entryForm(e, presetPid) {
     const f = new FormData(ev.target);
     if (!patient(f.get('pid'))) return toast('병실에 등록된 환자를 선택하세요', '');
     if (!txSel.length) return toast('치료 시술을 하나 이상 선택하세요', '');
-    const data = { pid: f.get('pid'), time: f.get('time'), tids: [...txSel], mob: f.get('mob'), memo: f.get('memo').trim(), daily: f.get('daily') === 'on' };
+    const data = { pid: f.get('pid'), time: f.get('time'), tids: [...txSel], mob: f.get('mob'), memo: f.get('memo').trim() };
     if (isNew) db.entries.push({ id: uid(), date: todayStr(), ...data }); else Object.assign(e, data);   // 날짜는 항상 오늘
     save(); closeSheet(); render();
   };
@@ -651,9 +678,9 @@ function demo() {
   const P = (name, room, bed, note = '') => { const p = { id: uid(), name, room, bed, note }; db.patients.push(p); return p.id; };
   const a = P('김영수', 1, 1), b = P('박순자', 1, 3, '낙상 주의'), c = P('이철민', 2, 1, '우측 편마비'), d = P('최미숙', 5, 4),
     e = P('정대호', 7, 2), f = P('한지원', 12, 1), g = P('오세훈', 15, 1), h = P('윤정자', 19, 1), i = P('강민수', 19, 2);
-  const E = (pid, time, tid, mob, daily = true) => db.entries.push({ id: uid(), pid, date, time, tids: [].concat(tid), mob, daily, memo: '' });
+  const E = (pid, time, tid, mob) => db.entries.push({ id: uid(), pid, date, time, tids: [].concat(tid), mob, memo: '' });
   [[a, '09:00', [pt, ot], 'walk'], [b, '09:00', pt, 'wheel'], [c, '09:30', ex, 'bed'], [d, '09:30', pt, 'walk'],
-    [e, '10:00', ot, 'wheel'], [f, '10:30', pt, 'walk'], [g, '10:30', xr, 'bed', false], [h, '11:00', ex, 'wheel'],
+    [e, '10:00', ot, 'wheel'], [f, '10:30', pt, 'walk'], [g, '10:30', xr, 'bed'], [h, '11:00', ex, 'wheel'],
     [i, '11:00', pt, 'walk'], [a, '14:00', ot, 'walk'], [c, '15:00', pt, 'bed']].forEach(x => E(...x));
   db.surgeries.push({ id: uid(), kind: 'sx', pid: c, date, time: '13:00', name: '무릎 인공관절', mob: 'bed', memo: '금식 확인, 수술실 3번' });
   save(); render(); toast('예시 데이터를 불러왔습니다', '');
