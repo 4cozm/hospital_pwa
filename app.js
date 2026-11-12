@@ -7,10 +7,12 @@ const ROOMS = Array.from({ length: 19 }, (_, i) => {
   return { no, code: 1200 + no, vip: no >= 12, cap: no <= 11 ? 4 : no === 19 ? 2 : 1 };
 });
 const roomOf = no => ROOMS.find(r => r.no === Number(no));
+/* 이동수단 (표시 순서: 혼자, 워커, 베드, 휠체어). escort=true 이면 모시러 가야 해서 이송→복귀 2단계 */
 const MOB = {
-  walk:  { label: '혼자',   escort: false },
-  wheel: { label: '휠체어', escort: true },
-  bed:   { label: '베드',   escort: true },
+  walk:   { label: '혼자',   escort: false },
+  walker: { label: '워커',   escort: false },
+  bed:    { label: '베드',   escort: true },
+  wheel:  { label: '휠체어', escort: true },
 };
 const KEY = 'ward-schedule-v1';
 
@@ -175,8 +177,6 @@ function renderToday() {
   const list = itemsOn(date);
   const total = list.length;
   const done = list.filter(e => stOf(e, date) === 2).length;
-  const esc_ = list.filter(e => twoStep(e) && stOf(e, date) !== 2).length;
-  const solo = list.filter(e => !twoStep(e) && stOf(e, date) !== 2).length;
 
   $('#top').innerHTML = `
     <div class="hrow">
@@ -187,10 +187,7 @@ function renderToday() {
         <button data-act="day" data-n="1" aria-label="다음날">›</button>
       </div>
     </div>
-    <div class="sum">
-      <span>전체 <b>${total}</b></span><span>완료 <b>${done}</b></span>
-      <span>모시러 <b>${esc_}</b></span><span>혼자 확인 <b>${solo}</b></span>
-    </div>`;
+    <div class="sum"><span>남은 <b>${total - done}</b></span><span>완료 <b>${done}</b></span><span>전체 <b>${total}</b></span></div>`;
 
   let html = backupBanner();
   const now = nowMin();
@@ -208,35 +205,28 @@ function renderToday() {
       <button class="btn pri" data-tab="tx">치료일정에서 입력하기</button>
       ${db.patients.length ? '' : '<br><button class="btn" data-act="demo">예시 데이터 불러오기</button>'}</div>`;
   } else {
-    const times = [...new Set(rest.map(e => e.time))];
-    for (const t of times) {
+    for (const t of [...new Set(rest.map(e => e.time))]) {
       const g = rest.filter(e => e.time === t);
-      const open = g.filter(e => stOf(e, date) !== 2);
-      const late = isToday && open.length && tmin(t) < now;
-      const cur = isToday && open.length && tmin(t) >= now && tmin(t) - now <= 30;
-      const ec = g.filter(e => twoStep(e)).length;
-      html += `<section class="grp"><div class="gh ${late ? 'late' : cur ? 'now' : ''}">
-        <span class="gt">${t}</span>
-        <span class="gc">${g.length}명${ec ? ` · 모시러 ${ec}` : ''}${late ? ' · 지연' : ''}</span></div>
-        ${g.map(e => card(e, late)).join('')}</section>`;
+      const late = isToday && g.some(e => stOf(e, date) !== 2) && tmin(t) < now;
+      html += `<section class="grp"><div class="gh ${late ? 'late' : ''}"><span class="gt">${t}</span>
+        <span class="gc">${g.length}명${late ? ' · 지연' : ''}</span></div>${g.map(card).join('')}</section>`;
     }
   }
   $('#view').innerHTML = html;
 }
 
+/* 맨 위 카드: 지금/다음에 처리할 한 건 */
 function hero(e) {
-  const p = patient(e.pid), st = stOf(e, date), m = MOB[mobOf(e)];
+  const p = patient(e.pid), st = stOf(e, date), sx = isSx(e);
   const diff = tmin(e.time) - nowMin();
-  const dur = n => n >= 60 ? `${Math.floor(n / 60)}시간${n % 60 ? ' ' + n % 60 + '분' : ''}` : `${n}분`;
-  const when = diff > 0 ? `${dur(diff)} 후` : diff === 0 ? '지금' : `${dur(-diff)} 지남`;
+  const when = diff > 0 ? `${fmtDur(diff)} 후` : diff === 0 ? '지금' : `${fmtDur(-diff)} 지남`;
+  const dest = destItems(e).map(i => `${esc(i.label)}${i.memo ? ' ' + esc(i.memo.replace(/\s*\n\s*/g, ' · ')) : ''}`).join(' / ');
   return `<div class="hero">
-    <div class="lab">${isSx(e) ? '수술 · ' : ''}${st === 1 ? (isSx(e) ? '진행 중' : '이송 중') : '다음 일정'} · ${when}</div>
-    <div class="big"><span class="t">${e.time}</span><span class="rm">${roomTag(p)}</span><span class="nm">${esc(p.name)}</span></div>
-    <div class="meta">${esc(txLabel(e))}${isSx(e) ? '' : ' · ' + m.label}${p.note ? ' · ' + esc(p.note) : ''}</div>
-    ${memoOf(e) ? `<div class="meta" style="font-size:18px;font-weight:700">→ ${esc(memoOf(e).replace(/\s*\n\s*/g, ' · '))}</div>` : ''}
-    ${awayHtml(e)}
-    ${sxLine(e)}
-    <div class="mini"><button class="go" data-act="adv" data-id="${e.id}">${advLabel(e, st)}</button></div>
+    <div class="hw">${sx ? '수술 · ' : ''}${st === 1 ? (sx ? '진행 중' : '이송 중') : '다음'} · ${when}</div>
+    <div class="hm"><span class="ht">${e.time}</span><span class="hr">${roomTag(p)}</span><span class="hn">${esc(p.name)}</span>${sx ? '' : mobBadge(mobOf(e))}</div>
+    <div class="hd">→ ${dest || '(시술 미지정)'}</div>
+    ${awayHtml(e)}${sxLine(e)}
+    <button class="go" data-act="adv" data-id="${e.id}">${advLabel(e, st)}</button>
   </div>`;
 }
 function advLabel(e, st) {
@@ -244,6 +234,7 @@ function advLabel(e, st) {
   if (twoStep(e)) return st === 0 ? '🚶 이송 완료' : '↩ 복귀 완료';
   return '✅ 잘 갔는지 확인';
 }
+const advShort = (e, st) => (twoStep(e) ? (st === 0 ? '이송' : '복귀') : '확인');
 /* 이송 후 경과: 이송 완료를 누른 뒤 얼마나 지났는지 (표시만, 경고 없음) */
 function awayHtml(e) {
   if (isSx(e) || stOf(e, date) !== 1) return '';              // 수술은 자체 타이머가 있음
@@ -255,45 +246,39 @@ function awayHtml(e) {
 function sxLine(e) {
   if (!isSx(e)) return '';
   const st = stOf(e, date), s = stampOf(e, date);
-  if (st === 0) return `<div class="sxt">예상 소요 <b>${fmtDur(e.dur || 60)}</b> · 이송 완료를 누르면 시작</div>`;
+  if (st === 0) return `<div class="sxt">예상 소요 <b>${fmtDur(e.dur || 60)}</b></div>`;
   if (!s) return '';
   if (st === 1) {
-    const total = e.dur || 60, end = s.out + total * 60000, left = Math.ceil((end - Date.now()) / 60000);
-    return `<div class="sxt"><div>수술 시작 ${hhmm(s.out)} · 소요 ${fmtDur(total)}</div>
-      <div class="end">예상 종료 <b>${hhmm(end)}</b> <span class="${left < 0 ? 'over' : ''}">${left >= 0 ? `${fmtDur(left)} 남음` : `⚠ ${fmtDur(-left)} 지연`}</span></div></div>`;
+    const end = s.out + (e.dur || 60) * 60000, left = Math.ceil((end - Date.now()) / 60000);
+    return `<div class="sxt">시작 ${hhmm(s.out)} · 예상 종료 <b>${hhmm(end)}</b> · <span class="${left < 0 ? 'over' : ''}">${left >= 0 ? `${fmtDur(left)} 남음` : `${fmtDur(-left)} 지연`}</span></div>`;
   }
   return `<div class="sxt">이송 ${hhmm(s.out)}${s.back ? ` → 복귀 ${hhmm(s.back)}` : ''}</div>`;
 }
 
 /* 목적지: 어디로 가는지(시술/수술 + 장소 메모)를 누르지 않아도 바로 보이게 */
-function destHtml(e) {
-  const items = isSx(e) ? [{ label: e.name, memo: e.memo, cid: '' }] : catsOf(e).map(c => ({ label: c.label, memo: c.memo, cid: c.id }));
-  if (!items.length) return '<div class="dest"><span class="note">(시술 미지정)</span></div>';
-  return `<div class="dest">${items.map(i => `<button class="d" data-act="pill" data-id="${e.id}" data-cid="${i.cid}"><span class="ar">→</span><span class="dn">${esc(i.label)}</span>${i.memo ? `<span class="dm">${esc(i.memo.replace(/\s*\n\s*/g, ' · '))}</span>` : ''}</button>`).join('')}</div>`;
+function destItems(e) {
+  return isSx(e) ? [{ label: e.name, memo: e.memo, cid: '' }] : catsOf(e).map(c => ({ label: c.label, memo: c.memo, cid: c.id }));
 }
-/* 진행 표시: 이송 → 복귀 (혼자 이동 환자는 확인 한 단계) */
-function progHtml(e, st) {
-  const steps = twoStep(e) ? ['이송', '복귀'] : ['확인'];
-  return `<div class="prog">${steps.map((t, i) => `<span class="${st > i ? 'on' : st === i ? 'cur' : ''}">${st > i ? '✓ ' : ''}${t}</span>`).join('')}</div>`;
+function destInline(e) {
+  const it = destItems(e);
+  if (!it.length) return '<span class="note">(시술 미지정)</span>';
+  return it.map(i => `<button class="d" data-act="pill" data-id="${e.id}" data-cid="${i.cid}"><span class="ar">→</span><span class="dn">${esc(i.label)}</span>${i.memo ? `<span class="dm">${esc(i.memo.replace(/\s*\n\s*/g, ' · '))}</span>` : ''}</button>`).join('');
 }
 
-function card(e, late) {
-  const p = patient(e.pid), st = stOf(e, date), mk = mobOf(e);
-  const btns = st === 2
-    ? `<button class="alt" data-act="undo" data-id="${e.id}">되돌리기</button>`
-    : `<button data-act="adv" data-id="${e.id}">${advLabel(e, st)}</button>${st === 1 ? `<button class="alt" data-act="undo" data-id="${e.id}">취소</button>` : ''}`;
-  const note = [p.note, isSx(e) ? '' : e.memo].filter(Boolean).join(' · ');
-  return `<article class="card ${twoStep(e) ? 'esc-card' : ''} ${st === 2 ? 'done' : ''} ${late ? 'late' : ''}">
-    ${roomBox(p)}
-    <div class="cbody">
-      <div class="who"><span class="n">${esc(p.name)}</span>${isSx(e) ? '<span class="chip sx">수술</span>' : mobBadge(mk)}</div>
-      ${destHtml(e)}
-      ${note ? `<div class="note">${esc(note)}</div>` : ''}
-      ${progHtml(e, st)}
-      ${awayHtml(e)}
+/* 오늘 시간표의 한 줄 카드: 왼쪽 정보, 오른쪽 큰 버튼 하나 */
+function card(e) {
+  const p = patient(e.pid), st = stOf(e, date), sx = isSx(e);
+  const note = [p.note, sx ? '' : e.memo].filter(Boolean).map(esc).join(' · ');
+  const side = st === 2
+    ? `<span class="fin">완료</span><button class="mini" data-act="undo" data-id="${e.id}">되돌리기</button>`
+    : `<button class="ab" data-act="adv" data-id="${e.id}">${advShort(e, st)}</button>${st === 1 ? `<button class="mini" data-act="undo" data-id="${e.id}">되돌리기</button>` : ''}`;
+  return `<article class="tc ${twoStep(e) ? 'esc' : ''} ${st === 1 ? 'moving' : ''} ${st === 2 ? 'done' : ''}">
+    <div class="tb">
+      <div class="t1"><b class="rt">${roomTag(p)}</b><span class="n">${esc(p.name)}</span>${sx ? '<span class="chip sx">수술</span>' : mobBadge(mobOf(e))}</div>
+      <div class="t2">${destInline(e)}</div>
+      ${note || awayHtml(e) || sxLine(e) ? `<div class="t3">${note}${awayHtml(e)}${sxLine(e)}</div>` : ''}
     </div>
-    ${sxLine(e)}
-    <div class="act">${btns}</div>
+    <div class="ta">${side}</div>
   </article>`;
 }
 
@@ -354,7 +339,7 @@ function editRows(list, act) {
 }
 function renderTx() {
   const today = todayStr(), list = entriesOn(today);
-  $('#top').innerHTML = `<div class="hrow"><h1>치료일정 · 오늘 ${fmtDate(today)}</h1></div>
+  $('#top').innerHTML = `<div class="hrow"><h1>치료일정 · 오늘 ${fmtDate(today)}</h1><button class="btn" data-act="bulk" style="margin:0">일괄 입력</button></div>
     <div class="sum"><span>${list.length}건</span><span>＋ 버튼으로 추가 · 항목을 눌러 수정</span></div>`;
   $('#view').innerHTML = list.length ? editRows(list, 'editEntry')
     : `<div class="empty-msg">오늘 치료 일정이 없습니다.<br><button class="btn pri" data-act="addEntry">＋ 치료 일정 추가</button></div>`;
@@ -381,7 +366,7 @@ function renderSettings() {
   <div class="set"><h3>치료 시술</h3>
     <p>치료일정에서는 여기에 등록한 시술만 선택할 수 있습니다. 시술 이름과 장소 메모를 미리 써두세요. 누르면 수정·삭제합니다.</p>
     ${db.cats.map(c => `<button class="pl" data-act="editCat" data-id="${c.id}"><div><div class="who"><span class="pill">${esc(c.label)}</span></div>
-      <div class="note" style="margin-top:4px">${c.memo ? esc(c.memo) : '장소 메모 없음'}</div></div></button>`).join('') || '<p class="note">아직 등록된 시술이 없습니다.</p>'}
+      <div class="note" style="margin-top:4px">${c.memo ? esc(c.memo) : '장소 메모 없음'}${(c.alias || []).length ? ` · 별칭: ${esc(c.alias.join(', '))}` : ''}</div></div></button>`).join('') || '<p class="note">아직 등록된 시술이 없습니다.</p>'}
     <button class="btn pri" data-act="addCat">＋ 시술 추가</button></div>
   <div class="set"><h3>알림</h3>
     <div class="f"><label>치료 몇 분 전에 알릴까요</label>
@@ -590,6 +575,7 @@ function catForm(c) {
   <form id="cf">
     <div class="f"><label>시술 이름 (일정에 필로 표시)</label><input name="label" value="${esc(c.label)}" required autocomplete="off" placeholder="예: 3층 PT"></div>
     <div class="f"><label>장소 메모 (필을 누르면 표시)</label><textarea name="memo" rows="3" placeholder="예: 3층 쭉 들어가서 좌측">${esc(c.memo)}</textarea></div>
+    <div class="f"><label>별칭 (선택 · 일괄 입력에서 같은 시술로 인식, 쉼표로 구분)</label><input name="alias" value="${esc((c.alias || []).join(', '))}" autocomplete="off" placeholder="예: PT, 피티"></div>
     <div class="acts">
       ${isNew ? '' : '<button type="button" class="danger" data-act="delCat">삭제</button>'}
       <button type="button" data-act="close">취소</button>
@@ -598,7 +584,7 @@ function catForm(c) {
   sheet.dataset.cid = c.id || '';
   $('#cf').onsubmit = ev => {
     ev.preventDefault();
-    const f = new FormData(ev.target), data = { label: f.get('label').trim(), memo: f.get('memo').trim() };
+    const f = new FormData(ev.target), data = { label: f.get('label').trim(), memo: f.get('memo').trim(), alias: [...new Set(f.get('alias').split(/[,，、]/).map(x => x.trim()).filter(Boolean))] };
     if (isNew) db.cats.push({ id: uid(), ...data }); else Object.assign(c, data);
     save(); closeSheet(); render();
   };
@@ -683,6 +669,14 @@ document.addEventListener('click', ev => {
     }
     case 'room': roomSheet(Number(t.dataset.no)); break;
     case 'close': closeSheet(); break;
+    case 'bulk': openBulk(); break;
+    case 'impCopy': impCopyPrompt(); break;
+    case 'impSample': impSample(); break;
+    case 'impFile': $('#impFile').click(); break;
+    case 'impAllWarn': impAllWarn(); break;
+    case 'impPm': impPm(Number(t.dataset.i)); break;
+    case 'impAllPm': impAllPm(); break;
+    case 'impGo': impGo(); break;
     case 'goSettings': closeSheet(); tab = 'settings'; render(); scrollTo(0, 0); break;
     case 'goRooms': closeSheet(); tab = 'rooms'; render(); scrollTo(0, 0); break;
     case 'pill': pillSheet(entry(), t.dataset.cid); break;
