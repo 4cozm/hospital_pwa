@@ -1,9 +1,6 @@
 :root{
   --bg:#f4f6f5; --card:#fff; --ink:#14201e; --sub:#5b6b68; --line:#dde4e2;
   --brand:#0f766e; --brand-ink:#fff;
-  --walk:#2563eb; --walk-bg:#e3ecff;
-  --wheel:#c2410c; --wheel-bg:#ffe9dc;
-  --bed:#be123c; --bed-bg:#ffe1e8;
   --ok:#15803d; --ok-bg:#dcf5e4;
   --late:#dc2626;
   --r:16px;
@@ -12,9 +9,6 @@
   :root{
     --bg:#0e1514; --card:#18211f; --ink:#eaf2f0; --sub:#9bb0ac; --line:#2a3836;
     --brand:#14b8a6; --brand-ink:#06201c;
-    --walk:#7da6ff; --walk-bg:#1c2a4d;
-    --wheel:#ffa66b; --wheel-bg:#43240f;
-    --bed:#ff8aa5; --bed-bg:#4a1523;
     --ok:#5fd68a; --ok-bg:#12341f;
     --late:#ff6b6b;
   }
@@ -72,34 +66,20 @@ main{padding:12px 16px;max-width:720px;margin:0 auto}
 
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:12px;margin-bottom:8px;
   display:grid;grid-template-columns:auto 1fr;gap:4px 12px;border-left:6px solid var(--line)}
-.card.walk{border-left-color:var(--walk)}
-.card.wheel{border-left-color:var(--wheel)}
-.card.bed{border-left-color:var(--bed)}
 .card.done{opacity:.5}
 .card.late:not(.done){outline:2px solid var(--late)}
 .room{grid-row:span 2;display:flex;flex-direction:column;align-items:center;justify-content:center;
   min-width:62px;border-radius:12px;background:var(--bg);padding:6px 4px}
 .room b{font-size:30px;line-height:1;font-weight:800}
 .room small{font-size:11px;color:var(--sub)}
-.room.vip b{color:var(--brand)}
 .who{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .who .n{font-size:20px;font-weight:700}
 .tx{font-size:15px}
 .note{font-size:13px;color:var(--sub)}
-.badge{display:inline-block;border-radius:999px;padding:2px 10px;font-size:13px;font-weight:800}
-.badge.walk{background:var(--walk-bg);color:var(--walk)}
-.badge.wheel{background:var(--wheel-bg);color:var(--wheel)}
-.badge.bed{background:var(--bed-bg);color:var(--bed)}
-.badge.st{background:var(--ok-bg);color:var(--ok)}
-.badge.go{background:var(--wheel-bg);color:var(--wheel)}
 .act{grid-column:1 / -1;display:flex;gap:8px;margin-top:6px}
 .act button{flex:1;border:0;border-radius:12px;padding:13px;font-weight:800;font-size:16px;
   background:var(--brand);color:var(--brand-ink)}
 .act button.alt{background:var(--bg);color:var(--ink);border:1px solid var(--line);flex:0 0 auto;padding:13px 16px;font-weight:600}
-.act button.esc{background:var(--wheel);color:#fff}
-.act button.esc.b{background:var(--bed)}
-.act button.fin{background:var(--ok);color:#fff}
-@media (prefers-color-scheme:dark){.act button.esc,.act button.esc.b,.act button.fin{color:#06130c}}
 
 .empty-msg{text-align:center;color:var(--sub);padding:40px 10px}
 .empty-msg button{margin-top:12px}
@@ -113,10 +93,6 @@ main{padding:12px 16px;max-width:720px;margin:0 auto}
 .rc .rh span{font-size:12px;color:var(--sub)}
 .slot{display:flex;align-items:center;gap:6px;font-size:14px;padding:3px 0}
 .slot.empty{color:var(--sub);opacity:.6}
-.dot{width:10px;height:10px;border-radius:50%;flex:none}
-.dot.walk{background:var(--walk)}.dot.wheel{background:var(--wheel)}.dot.bed{background:var(--bed)}
-.legend{display:flex;gap:12px;font-size:13px;color:var(--sub);margin-bottom:10px;flex-wrap:wrap}
-.legend span{display:flex;align-items:center;gap:5px}
 .sec{font-size:13px;font-weight:800;color:var(--sub);margin:14px 2px 6px}
 
 /* patients */
@@ -145,9 +121,6 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .seg label{flex:1;margin:0;position:relative;min-width:0}
 .seg input{position:absolute;opacity:0;pointer-events:none;width:1px;height:1px;padding:0;margin:0;border:0;left:0;top:0}
 .seg span{display:block;text-align:center;border:2px solid var(--line);border-radius:12px;padding:11px 0;font-weight:800;color:var(--ink)}
-.seg input:checked+span.walk{border-color:var(--walk);background:var(--walk-bg);color:var(--walk)}
-.seg input:checked+span.wheel{border-color:var(--wheel);background:var(--wheel-bg);color:var(--wheel)}
-.seg input:checked+span.bed{border-color:var(--bed);background:var(--bed-bg);color:var(--bed)}
 .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
 .chips button{border:1px solid var(--line);background:var(--bg);border-radius:999px;padding:6px 12px;font-size:14px}
 .chk{display:flex;align-items:center;gap:8px;font-size:15px}
@@ -167,7 +140,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .toast button{margin-left:auto;border:0;background:#ffffff22;color:#fff;border-radius:10px;padding:8px 12px}
 
 /* 치료 필 */
-.pill{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--brand);background:transparent;color:var(--brand);
+.pill{display:inline-flex;align-items:center;gap:4px;border:1.5px solid var(--ink);background:transparent;color:var(--ink);
   border-radius:999px;padding:5px 13px;font-size:16px;font-weight:800}
 .pill i{font-style:normal;font-size:12px;opacity:.7}
 .catpick{display:flex;flex-wrap:wrap;gap:8px}
@@ -177,10 +150,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .catpick span{display:block;border:2px solid var(--line);border-radius:999px;padding:9px 16px;font-weight:800;font-size:16px;color:var(--ink)}
 .catpick input:checked+span{border-color:var(--brand);background:var(--brand);color:var(--brand-ink)}
 
-.badge.sx{background:#efe3ff;color:#7c3aed}
-.pill.sx{border-color:#7c3aed;color:#7c3aed}
 .pl.row-edit{align-items:flex-start}
-@media (prefers-color-scheme:dark){.badge.sx{background:#2e1b4d;color:#c4a1ff}.pill.sx{border-color:#c4a1ff;color:#c4a1ff}}
 
 .newcat{display:grid;gap:8px;margin-top:8px}
 .newcat[hidden]{display:none}
@@ -219,11 +189,10 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .slot.hit .bn{background:var(--brand-ink);color:var(--brand)}
 
 /* 백업 안내 배너 */
-.bk{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--wheel-bg);color:var(--wheel);border-radius:14px;padding:10px 12px;margin-bottom:12px;font-weight:700;font-size:14px}
+.bk{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);color:var(--ink);border-radius:14px;padding:10px 12px;margin-bottom:12px;font-weight:700;font-size:14px}
 .bk span{flex:1 1 100%}
-.bk button{border:0;border-radius:10px;padding:9px 14px;font-weight:800;background:var(--wheel);color:#fff}
-.bk button.alt{background:transparent;color:var(--wheel);border:1px solid var(--wheel)}
-@media (prefers-color-scheme:dark){.bk button{color:#2b1200}.bk button.alt{color:var(--wheel)}}
+.bk button{border:0;border-radius:10px;padding:9px 14px;font-weight:800;background:var(--ink);color:var(--bg)}
+.bk button.alt{background:transparent;color:var(--ink);border:1px solid var(--line)}
 
 /* 수술 진행/예상 종료 */
 .sxt{grid-column:1/-1;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-top:4px;font-size:14px;color:var(--sub)}
@@ -238,3 +207,25 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .hero .sxt .end span.over{background:#dc2626;border-radius:8px;padding:1px 8px}
 .hero .sxt .ext{background:#fff;color:#0b4f49;border:0}
 .datenav button:disabled{opacity:.35}
+
+/* ===== 오늘 탭 v2: 색은 중립 + 강조(청록, 행동) + 경고(빨강, 지연) 세 가지만 ===== */
+.seg input:checked+span{border-color:var(--brand);background:var(--brand);color:var(--brand-ink)}
+.chip{display:inline-block;border-radius:8px;padding:3px 10px;font-size:14px;font-weight:800;line-height:1.3}
+.chip.escort{background:var(--ink);color:var(--bg)}
+.chip.solo{border:1.5px solid var(--line);color:var(--sub);padding:1.5px 9px}
+.chip.sx{border:1.5px solid var(--ink);color:var(--ink);padding:1.5px 9px}
+.card{border-left:6px solid var(--line);grid-template-columns:auto 1fr;align-items:start}
+.card.esc-card{border-left-color:var(--ink)}
+.card .room{grid-row:auto}
+.cbody{min-width:0;display:grid;gap:5px}
+.card .who .n{font-size:23px;line-height:1.2}
+.dest{display:grid;gap:3px}
+.dest .d{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px;border:0;background:none;padding:0;text-align:left;font:inherit;color:inherit}
+.dest .ar{color:var(--sub);font-weight:800}
+.dest .dn{font-size:20px;font-weight:800}
+.dest .dm{font-size:16px;color:var(--sub);font-weight:600}
+.prog{display:flex;gap:6px;margin-top:2px}
+.prog span{font-size:13px;font-weight:800;padding:2px 10px;border-radius:999px;border:1.5px solid var(--line);color:var(--sub)}
+.prog span.cur{border-color:var(--ink);color:var(--ink)}
+.prog span.on{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.gh .gt{font-size:28px}

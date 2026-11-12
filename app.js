@@ -162,7 +162,8 @@ function render() {
   ({ today: renderToday, tx: renderTx, sx: renderSx, rooms: renderRooms, settings: renderSettings })[tab]();
 }
 
-function mobBadge(k) { return `<span class="badge ${k}">${MOB[k].label}</span>`; }
+/* 이동 방식: 색 대신 '모시러 가야 하나'만 구분 (모시러=진한 칩, 혼자=외곽선 칩) */
+function mobBadge(k) { return `<span class="chip ${MOB[k].escort ? 'escort' : 'solo'}">${MOB[k].label}</span>`; }
 function roomBox(p) {
   const r = roomOf(p.room);
   return `<div class="room ${r?.vip ? 'vip' : ''}"><b>${p.room}</b><small>호${r?.vip ? ' 특' : ''}${bedLabel(p) ? ' · ' + bedLabel(p) : ''}</small></div>`;
@@ -230,6 +231,7 @@ function hero(e) {
     <div class="lab">${isSx(e) ? '수술 · ' : ''}${st === 1 ? (isSx(e) ? '진행 중' : '이송 중') : '다음 일정'} · ${when}</div>
     <div class="big"><span class="t">${e.time}</span><span class="rm">${p.room}호</span><span class="nm">${esc(p.name)}</span></div>
     <div class="meta">${bedLabel(p) ? bedLabel(p) + ' · ' : ''}${esc(txLabel(e))} · ${m.label}${p.note ? ' · ' + esc(p.note) : ''}</div>
+    ${memoOf(e) ? `<div class="meta" style="font-size:18px;font-weight:700">→ ${esc(memoOf(e).replace(/\s*\n\s*/g, ' · '))}</div>` : ''}
     ${sxLine(e)}
     <div class="mini"><button class="go" data-act="adv" data-id="${e.id}">${advLabel(e, st)}</button></div>
   </div>`;
@@ -254,21 +256,32 @@ function sxLine(e) {
   return `<div class="sxt">이송 ${hhmm(s.out)}${s.back ? ` → 복귀 ${hhmm(s.back)}` : ''}</div>`;
 }
 
+/* 목적지: 어디로 가는지(시술/수술 + 장소 메모)를 누르지 않아도 바로 보이게 */
+function destHtml(e) {
+  const items = isSx(e) ? [{ label: e.name, memo: e.memo, cid: '' }] : catsOf(e).map(c => ({ label: c.label, memo: c.memo, cid: c.id }));
+  if (!items.length) return '<div class="dest"><span class="note">(시술 미지정)</span></div>';
+  return `<div class="dest">${items.map(i => `<button class="d" data-act="pill" data-id="${e.id}" data-cid="${i.cid}"><span class="ar">→</span><span class="dn">${esc(i.label)}</span>${i.memo ? `<span class="dm">${esc(i.memo.replace(/\s*\n\s*/g, ' · '))}</span>` : ''}</button>`).join('')}</div>`;
+}
+/* 진행 표시: 이송 → 복귀 (혼자 이동 환자는 확인 한 단계) */
+function progHtml(e, st) {
+  const steps = twoStep(e) ? ['이송', '복귀'] : ['확인'];
+  return `<div class="prog">${steps.map((t, i) => `<span class="${st > i ? 'on' : st === i ? 'cur' : ''}">${st > i ? '✓ ' : ''}${t}</span>`).join('')}</div>`;
+}
+
 function card(e, late) {
-  const p = patient(e.pid), st = stOf(e, date), mk = mobOf(e), m = MOB[mk];
-  let btns = '';
-  if (st === 2) btns = `<button class="alt" data-act="undo" data-id="${e.id}">되돌리기</button>`;
-  else {
-    const cls = twoStep(e) ? (st === 0 ? 'esc ' + (mk === 'bed' ? 'b' : '') : 'fin') : 'fin';
-    btns = `<button class="${cls}" data-act="adv" data-id="${e.id}">${advLabel(e, st)}</button>
-      ${st === 1 ? `<button class="alt" data-act="undo" data-id="${e.id}">취소</button>` : ''}`;
-  }
-  const badge = (isSx(e) ? '<span class="badge sx">수술</span>' : '') + (st === 2 ? `<span class="badge st">${twoStep(e) ? '복귀 완료' : '확인 완료'}</span>` : st === 1 ? '<span class="badge go">이송됨 · 복귀 대기</span>' : '');
-  return `<article class="card ${mk} ${st === 2 ? 'done' : ''} ${late ? 'late' : ''}">
+  const p = patient(e.pid), st = stOf(e, date), mk = mobOf(e);
+  const btns = st === 2
+    ? `<button class="alt" data-act="undo" data-id="${e.id}">되돌리기</button>`
+    : `<button data-act="adv" data-id="${e.id}">${advLabel(e, st)}</button>${st === 1 ? `<button class="alt" data-act="undo" data-id="${e.id}">취소</button>` : ''}`;
+  const note = [p.note, isSx(e) ? '' : e.memo].filter(Boolean).join(' · ');
+  return `<article class="card ${twoStep(e) ? 'esc-card' : ''} ${st === 2 ? 'done' : ''} ${late ? 'late' : ''}">
     ${roomBox(p)}
-    <div class="who"><span class="n">${esc(p.name)}</span>${mobBadge(mk)}${badge}</div>
-    <div>${txPill(e)}
-      ${p.note || e.memo ? `<div class="note">${esc([p.note, e.memo].filter(Boolean).join(' · '))}</div>` : ''}</div>
+    <div class="cbody">
+      <div class="who"><span class="n">${esc(p.name)}</span>${mobBadge(mk)}${isSx(e) ? '<span class="chip sx">수술</span>' : ''}</div>
+      ${destHtml(e)}
+      ${note ? `<div class="note">${esc(note)}</div>` : ''}
+      ${progHtml(e, st)}
+    </div>
     ${sxLine(e)}
     <div class="act">${btns}</div>
   </article>`;
@@ -278,7 +291,7 @@ let roomQuery = '';
 /* 병실 검색: 입력할 때 화면을 다시 그리지 않고(포커스 유지) 결과 목록·카드 강조만 갱신 */
 function applyRoomFilter() {
   const q = roomQuery.trim(), res = $('#rres'); if (!res) return;
-  const hits = q ? db.patients.filter(p => nameMatch(p.name, q)).sort((a, b) => a.room - b.room || a.bed - b.bed) : [];
+  const hits = q ? db.patients.filter(p => patientMatch(p, q)).sort((a, b) => a.room - b.room || a.bed - b.bed) : [];
   const ids = new Set(hits.map(p => p.id));
   res.innerHTML = !q ? '' : hits.length
     ? `<div class="sec">검색 결과 ${hits.length}명 · 누르면 병실이 열립니다</div>` + hits.slice(0, 10).map(p =>
@@ -290,7 +303,7 @@ function applyRoomFilter() {
 function renderRooms() {
   $('#top').innerHTML = `<div class="hrow"><h1>병실 현황</h1></div>
     <div class="sum"><span>입원 <b>${db.patients.length}</b>명</span></div>
-    <input id="rsearch" class="sbox" type="search" enterkeyhint="search" placeholder="환자 이름 검색 (일부 또는 초성: 김영, ㄱㅇㅅ)" autocomplete="off" value="${esc(roomQuery)}">`;
+    <input id="rsearch" class="sbox" type="search" enterkeyhint="search" placeholder="이름 또는 호수 검색 (예: 김영, ㄱㅇㅅ, 5)" autocomplete="off" value="${esc(roomQuery)}">`;
   const card_ = r => {
     const slots = Array.from({ length: r.cap }, (_, i) => {
       const pa = patientAt(r.no, i + 1), bn = r.cap > 1 ? `<span class="bn">${i + 1}</span>` : '';
@@ -459,12 +472,17 @@ function patientOptions(room, sel) {
 /* 이름 검색: 부분 일치 또는 초성 (예: '김영', 'ㄱㅇㅅ') */
 const CHO = 'ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ';
 const choOf = str => [...str].map(ch => { const c = ch.charCodeAt(0) - 0xAC00; return c >= 0 && c < 11172 ? CHO[Math.floor(c / 588)] : ch; }).join('');
-const nameMatch = (name, q) => { q = q.trim().toLowerCase(); return !!q && (name.toLowerCase().includes(q) || choOf(name).includes(q)); };
+/* 검색: 숫자만(또는 '5호', '1205') 입력하면 그 호수 환자 전원, 그 외는 이름 일부/초성 */
+const patientMatch = (p, q) => {
+  q = q.trim().toLowerCase(); if (!q) return false;
+  if (/^\d+호?$/.test(q)) { const n = q.replace('호', ''); return n === String(p.room) || n === String(1200 + p.room); }
+  return p.name.toLowerCase().includes(q) || choOf(p.name).includes(q);
+};
 function pickerHtml(selPid) {
   const room = patient(selPid)?.room || null;
   const rooms = ROOMS.filter(r => db.patients.some(p => p.room === r.no));
-  return `<div class="f"><label>환자 이름 검색</label>
-    <input id="psearch" type="search" enterkeyhint="search" placeholder="이름 일부 또는 초성 (예: 김영, ㄱㅇㅅ)" autocomplete="off">
+  return `<div class="f"><label>환자 검색 (이름 · 호수)</label>
+    <input id="psearch" type="search" enterkeyhint="search" placeholder="이름 또는 호수 (예: 김영, ㄱㅇㅅ, 5)" autocomplete="off">
     <div id="presults" class="presults"></div></div>
   <div class="row">
     <div class="f"><label>호수</label><select name="room" required>${room ? '' : '<option value="">호수 선택</option>'}${rooms.map(r =>
@@ -481,7 +499,7 @@ function bindPicker(onPick) {
     $('#ppwrap').innerHTML = patientOptions(p.room, pid); bindPid();
     box.value = ''; res.innerHTML = ''; onPick?.(pid);
   };
-  const find = () => db.patients.filter(p => nameMatch(p.name, box.value)).sort((a, b) => a.room - b.room || a.bed - b.bed);
+  const find = () => db.patients.filter(p => patientMatch(p, box.value)).sort((a, b) => a.room - b.room || a.bed - b.bed);
   box.oninput = () => {
     const hits = find();
     res.innerHTML = !box.value.trim() ? '' : hits.length
