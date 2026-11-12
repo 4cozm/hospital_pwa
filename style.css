@@ -233,9 +233,5 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 /* 이송 후 경과 시간 */
 .away{font-size:15px;font-weight:700;color:var(--sub)}
 .away b{font-size:21px;color:var(--ink)}
-.away.over,.away.over b{color:var(--late)}
-.askn{color:var(--late)}
-.askn b{color:var(--late)}
 .hero .away,.hero .away b{color:#fff}
 .hero .away{margin:2px 0 10px}
-.hero .away.over{background:#dc2626;border-radius:8px;padding:4px 10px;display:inline-block}

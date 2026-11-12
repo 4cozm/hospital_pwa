@@ -177,7 +177,6 @@ function renderToday() {
   const done = list.filter(e => stOf(e, date) === 2).length;
   const esc_ = list.filter(e => twoStep(e) && stOf(e, date) !== 2).length;
   const solo = list.filter(e => !twoStep(e) && stOf(e, date) !== 2).length;
-  const ask = list.filter(e => awayInfo(e)?.over).length;
 
   $('#top').innerHTML = `
     <div class="hrow">
@@ -190,7 +189,7 @@ function renderToday() {
     </div>
     <div class="sum">
       <span>전체 <b>${total}</b></span><span>완료 <b>${done}</b></span>
-      <span>모시러 <b>${esc_}</b></span><span>혼자 확인 <b>${solo}</b></span>${ask ? `<span class="askn">⚠ 확인해 볼 환자 <b>${ask}</b></span>` : ''}
+      <span>모시러 <b>${esc_}</b></span><span>혼자 확인 <b>${solo}</b></span>
     </div>`;
 
   let html = backupBanner();
@@ -244,18 +243,12 @@ function advLabel(e, st) {
   if (twoStep(e)) return st === 0 ? '🚶 이송 완료' : '↩ 복귀 완료';
   return '✅ 잘 갔는지 확인';
 }
-/* 이송 후 경과: 이송 완료를 누른 뒤 얼마나 지났는지. 시술의 '보통 소요시간 + ASK_EXTRA분'을 넘기면 확인해 볼 시간 */
-const ASK_EXTRA = 15;
-function awayInfo(e) {
-  if (isSx(e) || stOf(e, date) !== 1) return null;           // 수술은 자체 타이머가 있음
-  const s = stampOf(e, date); if (!s || !s.out) return null;
-  const el = Math.max(0, Math.floor((Date.now() - s.out) / 60000));
-  const typ = catsOf(e).reduce((a, c) => a + (c.dur || 0), 0);   // 시술이 여러 개면 소요시간 합산
-  return { el, typ, over: typ > 0 && el > typ + ASK_EXTRA };
-}
+/* 이송 후 경과: 이송 완료를 누른 뒤 얼마나 지났는지 (표시만, 경고 없음) */
 function awayHtml(e) {
-  const a = awayInfo(e); if (!a) return '';
-  return `<div class="away ${a.over ? 'over' : ''}">이송 후 <b>${fmtDur(a.el)}</b> 경과${a.typ ? ` · 보통 ${fmtDur(a.typ)}` : ''}${a.over ? ' · ⚠ 확인해 볼 시간' : ''}</div>`;
+  if (isSx(e) || stOf(e, date) !== 1) return '';              // 수술은 자체 타이머가 있음
+  const s = stampOf(e, date); if (!s || !s.out) return '';
+  const el = Math.max(0, Math.floor((Date.now() - s.out) / 60000));
+  return `<div class="away">이송 후 <b>${fmtDur(el)}</b> 경과</div>`;
 }
 /* 수술: 이송 완료 시점부터 예상 소요시간을 세어 예상 종료 시각 표시 (지연되면 지연 시간, +30분 연장 가능) */
 function sxLine(e) {
@@ -388,7 +381,7 @@ function renderSettings() {
   <div class="set"><h3>치료 시술</h3>
     <p>치료일정에서는 여기에 등록한 시술만 선택할 수 있습니다. 시술 이름과 장소 메모를 미리 써두세요. 누르면 수정·삭제합니다.</p>
     ${db.cats.map(c => `<button class="pl" data-act="editCat" data-id="${c.id}"><div><div class="who"><span class="pill">${esc(c.label)}</span></div>
-      <div class="note" style="margin-top:4px">${c.memo ? esc(c.memo) : '장소 메모 없음'}${c.dur ? ` · 보통 ${fmtDur(c.dur)}` : ''}</div></div></button>`).join('') || '<p class="note">아직 등록된 시술이 없습니다.</p>'}
+      <div class="note" style="margin-top:4px">${c.memo ? esc(c.memo) : '장소 메모 없음'}</div></div></button>`).join('') || '<p class="note">아직 등록된 시술이 없습니다.</p>'}
     <button class="btn pri" data-act="addCat">＋ 시술 추가</button></div>
   <div class="set"><h3>알림</h3>
     <div class="f"><label>치료 몇 분 전에 알릴까요</label>
@@ -592,13 +585,11 @@ function entryForm(e, presetPid) {
 }
 function catForm(c) {
   const isNew = !c;
-  c = c || { label: '', memo: '', dur: 0 };
+  c = c || { label: '', memo: '' };
   openSheet(`<h2>${isNew ? '치료 시술 추가' : '치료 시술 수정'}</h2>
   <form id="cf">
     <div class="f"><label>시술 이름 (일정에 필로 표시)</label><input name="label" value="${esc(c.label)}" required autocomplete="off" placeholder="예: 3층 PT"></div>
     <div class="f"><label>장소 메모 (필을 누르면 표시)</label><textarea name="memo" rows="3" placeholder="예: 3층 쭉 들어가서 좌측">${esc(c.memo)}</textarea></div>
-    <div class="f"><label>보통 소요시간 (선택 · 이송 후 이만큼 지나면 확인 표시)</label>
-      <select name="dur">${[0, 5, 10, 15, 20, 30, 45, 60, 90, 120].map(n => `<option value="${n}" ${(c.dur || 0) === n ? 'selected' : ''}>${n ? fmtDur(n) : '설정 안 함'}</option>`).join('')}</select></div>
     <div class="acts">
       ${isNew ? '' : '<button type="button" class="danger" data-act="delCat">삭제</button>'}
       <button type="button" data-act="close">취소</button>
@@ -607,7 +598,7 @@ function catForm(c) {
   sheet.dataset.cid = c.id || '';
   $('#cf').onsubmit = ev => {
     ev.preventDefault();
-    const f = new FormData(ev.target), data = { label: f.get('label').trim(), memo: f.get('memo').trim(), dur: Number(f.get('dur')) || 0 };
+    const f = new FormData(ev.target), data = { label: f.get('label').trim(), memo: f.get('memo').trim() };
     if (isNew) db.cats.push({ id: uid(), ...data }); else Object.assign(c, data);
     save(); closeSheet(); render();
   };
