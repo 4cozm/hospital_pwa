@@ -28,7 +28,7 @@ function load() {
 function migrate(d) {
   d.cats = d.cats || [];
   d.surgeries = d.surgeries || [];
-  d.stamps = d.stamps || {};                       // 이송/복귀 시각 기록 { 'id|날짜': {out, back, ext} }
+  d.stamps = d.stamps || {};                       // 이송/복귀 시각 기록 { 'id|날짜': {out, back} }
   d.surgeries.forEach(x => { x.dur = x.dur || 60; delete x.mob; });   // 예상 수술 소요시간(분). 수술의 이동 방식은 직전에 정해지므로 저장하지 않음
   d.settings = d.settings || { lead: 10 };
   d.settings.firstUse = d.settings.firstUse || Date.now();   // 백업 안내 기준일
@@ -251,17 +251,16 @@ function awayHtml(e) {
   const el = Math.max(0, Math.floor((Date.now() - s.out) / 60000));
   return `<div class="away">이송 후 <b>${fmtDur(el)}</b> 경과</div>`;
 }
-/* 수술: 이송 완료 시점부터 예상 소요시간을 세어 예상 종료 시각 표시 (지연되면 지연 시간, +30분 연장 가능) */
+/* 수술: 이송 완료 시점부터 예상 소요시간을 세어 예상 종료 시각 표시 (지연되면 지연 시간 표시) */
 function sxLine(e) {
   if (!isSx(e)) return '';
   const st = stOf(e, date), s = stampOf(e, date);
   if (st === 0) return `<div class="sxt">예상 소요 <b>${fmtDur(e.dur || 60)}</b> · 이송 완료를 누르면 시작</div>`;
   if (!s) return '';
   if (st === 1) {
-    const total = (e.dur || 60) + (s.ext || 0), end = s.out + total * 60000, left = Math.ceil((end - Date.now()) / 60000);
+    const total = e.dur || 60, end = s.out + total * 60000, left = Math.ceil((end - Date.now()) / 60000);
     return `<div class="sxt"><div>수술 시작 ${hhmm(s.out)} · 소요 ${fmtDur(total)}</div>
-      <div class="end">예상 종료 <b>${hhmm(end)}</b> <span class="${left < 0 ? 'over' : ''}">${left >= 0 ? `${fmtDur(left)} 남음` : `⚠ ${fmtDur(-left)} 지연`}</span></div>
-      <button class="ext" data-act="sxext" data-id="${e.id}">+30분 연장</button></div>`;
+      <div class="end">예상 종료 <b>${hhmm(end)}</b> <span class="${left < 0 ? 'over' : ''}">${left >= 0 ? `${fmtDur(left)} 남음` : `⚠ ${fmtDur(-left)} 지연`}</span></div></div>`;
   }
   return `<div class="sxt">이송 ${hhmm(s.out)}${s.back ? ` → 복귀 ${hhmm(s.back)}` : ''}</div>`;
 }
@@ -712,7 +711,6 @@ document.addEventListener('click', ev => {
       else { setStamp(e, date, null); setSt(e, date, 0); }
       render(); break;
     }
-    case 'sxext': { const e = entry(); const s = stampOf(e, date); if (s) { s.ext = (s.ext || 0) + 30; save(); render(); } break; }
     case 'delEntry': {
       const eid = sheet.dataset.eid;
       if (confirm('이 일정을 삭제할까요?')) { db.entries = db.entries.filter(e => e.id !== eid); save(); closeSheet(); render(); }
