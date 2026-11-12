@@ -20,14 +20,16 @@ let db = load();
 function load() {
   try {
     const d = JSON.parse(localStorage.getItem(KEY));
-    if (d && d.patients && d.entries) return migrate({ status: {}, settings: { lead: 10 }, cats: [], surgeries: [], ...d });
+    if (d && d.patients && d.entries) return migrate({ status: {}, stamps: {}, settings: { lead: 10 }, cats: [], surgeries: [], ...d });
   } catch (e) {}
-  return { patients: [], entries: [], status: {}, settings: { lead: 10, firstUse: Date.now() }, cats: [], surgeries: [] };
+  return { patients: [], entries: [], status: {}, stamps: {}, settings: { lead: 10, firstUse: Date.now() }, cats: [], surgeries: [] };
 }
 /* v1 → v2: 이동방식은 환자가 아니라 일정(entry)의 속성, 치료는 카테고리(cats) 참조 */
 function migrate(d) {
   d.cats = d.cats || [];
   d.surgeries = d.surgeries || [];
+  d.stamps = d.stamps || {};                       // 이송/복귀 시각 기록 { 'id|날짜': {out, back, ext} }
+  d.surgeries.forEach(x => { x.dur = x.dur || 60; });   // 예상 수술 소요시간(분)
   d.settings = d.settings || { lead: 10 };
   d.settings.firstUse = d.settings.firstUse || Date.now();   // 백업 안내 기준일
   const P = id => d.patients.find(p => p.id === id);
@@ -129,7 +131,25 @@ function itemsOn(d) {
 }
 const surgeriesOn = d => db.surgeries.filter(s => patient(s.pid) && s.date === d).sort((a, b) => tmin(a.time) - tmin(b.time));
 const roomNo = e => patient(e.pid)?.room ?? 99;
+const fmtDur = n => n >= 60 ? `${Math.floor(n / 60)}시간${n % 60 ? ' ' + n % 60 + '분' : ''}` : `${n}분`;
+const hhmm = ts => { const x = new Date(ts); return `${pad(x.getHours())}:${pad(x.getMinutes())}`; };
+/* 이송→복귀 2단계 대상: 휠체어/베드 환자, 그리고 수술은 이동 방식과 상관없이 항상 */
+const twoStep = e => isSx(e) || MOB[mobOf(e)].escort;
 const stKey = (e, d) => `${e.id}|${d}`;
+const stampOf = (e, d) => db.stamps[stKey(e, d)];
+function setStamp(e, d, patch) { const k = stKey(e, d); if (patch) db.stamps[k] = { ...(db.stamps[k] || {}), ...patch }; else delete db.stamps[k]; }
+/* 하루가 지난 기록은 자연스럽게 사라지도록 삭제 (환자/병실 배정은 유지) */
+function purgeOld() {
+  const t = todayStr(), size = () => db.entries.length + db.surgeries.length + Object.keys(db.status).length + Object.keys(db.stamps).length;
+  const before = size();
+  db.entries = db.entries.filter(e => e.date >= t);
+  db.surgeries = db.surgeries.filter(x => x.date >= t);
+  for (const k of Object.keys(db.status)) if (k.split('|')[1] < t) delete db.status[k];
+  for (const k of Object.keys(db.stamps)) if (k.split('|')[1] < t) delete db.stamps[k];
+  if (size() === before) return false;
+  if (date < t) date = t;
+  save(); return true;
+}
 const stOf = (e, d) => db.status[stKey(e, d)] || 0;   // 0 대기, 1 모시러 감/이동 중, 2 완료
 function setSt(e, d, v) { if (v) db.status[stKey(e, d)] = v; else delete db.status[stKey(e, d)]; save(); }
 
@@ -153,14 +173,14 @@ function renderToday() {
   const list = itemsOn(date);
   const total = list.length;
   const done = list.filter(e => stOf(e, date) === 2).length;
-  const esc_ = list.filter(e => MOB[mobOf(e)].escort && stOf(e, date) !== 2).length;
-  const solo = list.filter(e => !MOB[mobOf(e)].escort && stOf(e, date) !== 2).length;
+  const esc_ = list.filter(e => twoStep(e) && stOf(e, date) !== 2).length;
+  const solo = list.filter(e => !twoStep(e) && stOf(e, date) !== 2).length;
 
   $('#top').innerHTML = `
     <div class="hrow">
       <h1>${isToday ? '오늘 ' : ''}${fmtDate(date)}</h1>
       <div class="datenav">
-        <button data-act="day" data-n="-1" aria-label="전날">‹</button>
+        <button data-act="day" data-n="-1" aria-label="전날" ${date <= todayStr() ? 'disabled' : ''}>‹</button>
         <button class="dl" data-act="day" data-n="0">오늘</button>
         <button data-act="day" data-n="1" aria-label="다음날">›</button>
       </div>
@@ -191,7 +211,7 @@ function renderToday() {
       const open = g.filter(e => stOf(e, date) !== 2);
       const late = isToday && open.length && tmin(t) < now;
       const cur = isToday && open.length && tmin(t) >= now && tmin(t) - now <= 30;
-      const ec = g.filter(e => MOB[mobOf(e)].escort).length;
+      const ec = g.filter(e => twoStep(e)).length;
       html += `<section class="grp"><div class="gh ${late ? 'late' : cur ? 'now' : ''}">
         <span class="gt">${t}</span>
         <span class="gc">${g.length}명${ec ? ` · 모시러 ${ec}` : ''}${late ? ' · 지연' : ''}</span></div>
@@ -207,15 +227,31 @@ function hero(e) {
   const dur = n => n >= 60 ? `${Math.floor(n / 60)}시간${n % 60 ? ' ' + n % 60 + '분' : ''}` : `${n}분`;
   const when = diff > 0 ? `${dur(diff)} 후` : diff === 0 ? '지금' : `${dur(-diff)} 지남`;
   return `<div class="hero">
-    <div class="lab">${isSx(e) ? '수술 · ' : ''}${st === 1 ? '이송 중' : '다음 일정'} · ${when}</div>
+    <div class="lab">${isSx(e) ? '수술 · ' : ''}${st === 1 ? (isSx(e) ? '진행 중' : '이송 중') : '다음 일정'} · ${when}</div>
     <div class="big"><span class="t">${e.time}</span><span class="rm">${p.room}호</span><span class="nm">${esc(p.name)}</span></div>
     <div class="meta">${bedLabel(p) ? bedLabel(p) + ' · ' : ''}${esc(txLabel(e))} · ${m.label}${p.note ? ' · ' + esc(p.note) : ''}</div>
-    <div class="mini"><button class="go" data-act="adv" data-id="${e.id}">${advLabel(m, st)}</button></div>
+    ${sxLine(e)}
+    <div class="mini"><button class="go" data-act="adv" data-id="${e.id}">${advLabel(e, st)}</button></div>
   </div>`;
 }
-function advLabel(m, st) {
-  if (m.escort) return st === 0 ? '🚶 이송 완료' : '↩ 복귀 완료';
+function advLabel(e, st) {
+  if (isSx(e)) return st === 0 ? '🏥 이송 완료 (수술 시작)' : '↩ 복귀 완료';
+  if (twoStep(e)) return st === 0 ? '🚶 이송 완료' : '↩ 복귀 완료';
   return '✅ 잘 갔는지 확인';
+}
+/* 수술: 이송 완료 시점부터 예상 소요시간을 세어 예상 종료 시각 표시 (지연되면 지연 시간, +30분 연장 가능) */
+function sxLine(e) {
+  if (!isSx(e)) return '';
+  const st = stOf(e, date), s = stampOf(e, date);
+  if (st === 0) return `<div class="sxt">예상 소요 <b>${fmtDur(e.dur || 60)}</b> · 이송 완료를 누르면 시작</div>`;
+  if (!s) return '';
+  if (st === 1) {
+    const total = (e.dur || 60) + (s.ext || 0), end = s.out + total * 60000, left = Math.ceil((end - Date.now()) / 60000);
+    return `<div class="sxt"><div>수술 시작 ${hhmm(s.out)} · 소요 ${fmtDur(total)}</div>
+      <div class="end">예상 종료 <b>${hhmm(end)}</b> <span class="${left < 0 ? 'over' : ''}">${left >= 0 ? `${fmtDur(left)} 남음` : `⚠ ${fmtDur(-left)} 지연`}</span></div>
+      <button class="ext" data-act="sxext" data-id="${e.id}">+30분 연장</button></div>`;
+  }
+  return `<div class="sxt">이송 ${hhmm(s.out)}${s.back ? ` → 복귀 ${hhmm(s.back)}` : ''}</div>`;
 }
 
 function card(e, late) {
@@ -223,16 +259,17 @@ function card(e, late) {
   let btns = '';
   if (st === 2) btns = `<button class="alt" data-act="undo" data-id="${e.id}">되돌리기</button>`;
   else {
-    const cls = m.escort ? (st === 0 ? 'esc ' + (mk === 'bed' ? 'b' : '') : 'fin') : 'fin';
-    btns = `<button class="${cls}" data-act="adv" data-id="${e.id}">${advLabel(m, st)}</button>
+    const cls = twoStep(e) ? (st === 0 ? 'esc ' + (mk === 'bed' ? 'b' : '') : 'fin') : 'fin';
+    btns = `<button class="${cls}" data-act="adv" data-id="${e.id}">${advLabel(e, st)}</button>
       ${st === 1 ? `<button class="alt" data-act="undo" data-id="${e.id}">취소</button>` : ''}`;
   }
-  const badge = (isSx(e) ? '<span class="badge sx">수술</span>' : '') + (st === 2 ? `<span class="badge st">${m.escort ? '복귀 완료' : '확인 완료'}</span>` : st === 1 ? '<span class="badge go">이송됨 · 복귀 대기</span>' : '');
+  const badge = (isSx(e) ? '<span class="badge sx">수술</span>' : '') + (st === 2 ? `<span class="badge st">${twoStep(e) ? '복귀 완료' : '확인 완료'}</span>` : st === 1 ? '<span class="badge go">이송됨 · 복귀 대기</span>' : '');
   return `<article class="card ${mk} ${st === 2 ? 'done' : ''} ${late ? 'late' : ''}">
     ${roomBox(p)}
     <div class="who"><span class="n">${esc(p.name)}</span>${mobBadge(mk)}${badge}</div>
     <div>${txPill(e)}
       ${p.note || e.memo ? `<div class="note">${esc([p.note, e.memo].filter(Boolean).join(' · '))}</div>` : ''}</div>
+    ${sxLine(e)}
     <div class="act">${btns}</div>
   </article>`;
 }
@@ -286,7 +323,7 @@ function editRows(list, act) {
         const p = patient(e.pid);
         return `<button class="pl row-edit" data-act="${act}" data-id="${e.id}">${roomBox(p)}
           <div><div class="who"><span class="n">${esc(p.name)}</span>${mobBadge(mobOf(e))}</div>
-          <div>${txPill(e, 'span')}</div>
+          <div>${txPill(e, 'span')}${isSx(e) ? ` <span class="note">· 예상 소요 ${fmtDur(e.dur || 60)}</span>` : ''}</div>
           ${e.memo ? `<div class="note">${esc(e.memo)}</div>` : ''}</div></button>`;
       }).join('')}</section>`;
   }
@@ -541,7 +578,7 @@ function catForm(c) {
 function sxForm(e, presetPid) {
   if (!db.patients.length) return noPatientSheet();
   const isNew = !e;
-  e = e || { kind: 'sx', pid: presetPid || '', date, time: '08:00', name: '', mob: 'bed', memo: '' };
+  e = e || { kind: 'sx', pid: presetPid || '', date, time: '08:00', name: '', dur: 60, mob: 'bed', memo: '' };
   openSheet(`<h2>${isNew ? '수술 일정 추가' : '수술 일정 수정'}</h2>
   <form id="sf">
     ${pickerHtml(e.pid)}
@@ -550,6 +587,8 @@ function sxForm(e, presetPid) {
       <div class="f"><label>시간</label><input type="time" name="time" value="${e.time}" required></div>
     </div>
     <div class="f"><label>수술명</label><input name="name" value="${esc(e.name)}" required autocomplete="off" placeholder="예: 무릎 인공관절"></div>
+    <div class="f"><label>예상 수술 소요시간 (이송 완료 시점부터 계산)</label>
+      <select name="dur" required>${[30, 60, 90, 120, 150, 180, 210, 240, 300, 360, 480].map(n => `<option value="${n}" ${(e.dur || 60) === n ? 'selected' : ''}>${fmtDur(n)}</option>`).join('')}</select></div>
     <div class="f"><label>이동 방식</label><div class="seg">
       ${Object.entries(MOB).map(([k, v]) => `<label><input type="radio" name="mob" value="${k}" ${mobOf(e) === k ? 'checked' : ''}><span class="${k}">${v.label}</span></label>`).join('')}
     </div></div>
@@ -565,7 +604,7 @@ function sxForm(e, presetPid) {
     ev.preventDefault();
     const f = new FormData(ev.target);
     if (!patient(f.get('pid'))) return toast('병실에 등록된 환자를 선택하세요', '');
-    const data = { kind: 'sx', pid: f.get('pid'), date: f.get('date'), time: f.get('time'), name: f.get('name').trim(), mob: f.get('mob'), memo: f.get('memo').trim() };
+    const data = { kind: 'sx', pid: f.get('pid'), date: f.get('date'), time: f.get('time'), name: f.get('name').trim(), dur: Number(f.get('dur')) || 60, mob: f.get('mob'), memo: f.get('memo').trim() };
     if (isNew) db.surgeries.push({ id: uid(), ...data }); else Object.assign(e, data);
     date = data.date; save(); closeSheet(); render();
   };
@@ -637,9 +676,17 @@ document.addEventListener('click', ev => {
     }
     case 'adv': {
       const e = entry(), st = stOf(e, date);
-      setSt(e, date, MOB[mobOf(e)].escort && st === 0 ? 1 : 2); render(); break;
+      if (twoStep(e) && st === 0) { setStamp(e, date, { out: Date.now() }); setSt(e, date, 1); }
+      else { if (twoStep(e)) setStamp(e, date, { back: Date.now() }); setSt(e, date, 2); }
+      render(); break;
     }
-    case 'undo': { const e = entry(); setSt(e, date, stOf(e, date) === 2 && MOB[mobOf(e)].escort ? 1 : 0); render(); break; }
+    case 'undo': {
+      const e = entry(), st = stOf(e, date);
+      if (st === 2 && twoStep(e)) { const s = stampOf(e, date); if (s) delete s.back; setSt(e, date, 1); }
+      else { setStamp(e, date, null); setSt(e, date, 0); }
+      render(); break;
+    }
+    case 'sxext': { const e = entry(); const s = stampOf(e, date); if (s) { s.ext = (s.ext || 0) + 30; save(); render(); } break; }
     case 'delEntry': {
       const eid = sheet.dataset.eid;
       if (confirm('이 일정을 삭제할까요?')) { db.entries = db.entries.filter(e => e.id !== eid); save(); closeSheet(); render(); }
@@ -665,7 +712,7 @@ document.addEventListener('click', ev => {
     case 'import': $('#file').click(); break;
     case 'demo': demo(); break;
     case 'wipe':
-      if (confirm('모든 환자·일정 데이터를 삭제합니다. 되돌릴 수 없습니다.')) { db = { ...db, patients: [], entries: [], surgeries: [], status: {} }; save(); render(); }
+      if (confirm('모든 환자·일정 데이터를 삭제합니다. 되돌릴 수 없습니다.')) { db = { ...db, patients: [], entries: [], surgeries: [], status: {}, stamps: {} }; save(); render(); }
       break;
     case 'toastGo': t.closest('.toast').remove(); tab = 'today'; date = todayStr(); render(); break;
   }
@@ -684,7 +731,7 @@ function importFile(ev) {
     const d = JSON.parse(txt);
     if (!Array.isArray(d.patients) || !Array.isArray(d.entries)) throw 0;
     if (!confirm('현재 데이터를 백업 파일로 덮어쓸까요?')) return;
-    db = migrate({ status: {}, settings: { lead: 10 }, cats: [], surgeries: [], ...d }); save(); render(); toast('불러오기 완료', '');
+    db = migrate({ status: {}, stamps: {}, settings: { lead: 10 }, cats: [], surgeries: [], ...d }); save(); render(); toast('불러오기 완료', '');
   }).catch(() => toast('불러오기 실패', '올바른 백업 파일이 아닙니다'));
 }
 function exportIcs() {
@@ -711,6 +758,7 @@ function toast(title, sub, go) {
   setTimeout(() => el.remove(), go ? 60000 : 4000);
 }
 function tick() {
+  purgeOld();
   const d = todayStr(), now = nowMin(), lead = db.settings.lead;
   for (const e of itemsOn(d)) {
     if (stOf(e, d) !== 0) continue;
@@ -718,7 +766,7 @@ function tick() {
     if (fired.has(k) || now < tmin(e.time) - lead || now > tmin(e.time) + 30) continue;
     fired.add(k); sessionStorage.setItem('fired', JSON.stringify([...fired]));
     const p = patient(e.pid);
-    const act = MOB[mobOf(e)].escort ? `${MOB[mobOf(e)].label} 모시러 가기` : '혼자 이동 · 도착 확인';
+    const act = twoStep(e) ? `${MOB[mobOf(e)].label} 모시러 가기` : '혼자 이동 · 도착 확인';
     const title = `${e.time} ${p.room}호 ${p.name}`, body = `${txLabel(e)} · ${act}`;
     toast(title, body, true);
     try { navigator.vibrate?.([200, 100, 200]); } catch (e) {}
@@ -742,11 +790,12 @@ function demo() {
   [[a, '09:00', [pt, ot], 'walk'], [b, '09:00', pt, 'wheel'], [c, '09:30', ex, 'bed'], [d, '09:30', pt, 'walk'],
     [e, '10:00', ot, 'wheel'], [f, '10:30', pt, 'walk'], [g, '10:30', xr, 'bed'], [h, '11:00', ex, 'wheel'],
     [i, '11:00', pt, 'walk'], [a, '14:00', ot, 'walk'], [c, '15:00', pt, 'bed']].forEach(x => E(...x));
-  db.surgeries.push({ id: uid(), kind: 'sx', pid: c, date, time: '13:00', name: '무릎 인공관절', mob: 'bed', memo: '금식 확인, 수술실 3번' });
+  db.surgeries.push({ id: uid(), kind: 'sx', pid: c, date, time: '13:00', name: '무릎 인공관절', dur: 120, mob: 'bed', memo: '금식 확인, 수술실 3번' });
   save(); render(); toast('예시 데이터를 불러왔습니다', '');
 }
 
 /* ================= 시작 ================= */
+purgeOld();
 render();
 try { navigator.storage?.persist?.(); } catch (e) {}   // 브라우저가 임의로 데이터를 지우지 못하도록 요청 (허용 여부는 브라우저 판단)
 setInterval(tick, 20000); tick();

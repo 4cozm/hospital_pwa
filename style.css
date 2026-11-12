@@ -224,3 +224,17 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .bk button{border:0;border-radius:10px;padding:9px 14px;font-weight:800;background:var(--wheel);color:#fff}
 .bk button.alt{background:transparent;color:var(--wheel);border:1px solid var(--wheel)}
 @media (prefers-color-scheme:dark){.bk button{color:#2b1200}.bk button.alt{color:var(--wheel)}}
+
+/* 수술 진행/예상 종료 */
+.sxt{grid-column:1/-1;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-top:4px;font-size:14px;color:var(--sub)}
+.sxt b{color:var(--ink)}
+.sxt .end{font-size:19px;font-weight:800;color:var(--ink);margin-top:2px}
+.sxt .end b{font-size:26px}
+.sxt .end span{font-size:15px;font-weight:700;color:var(--sub)}
+.sxt .end span.over{color:var(--late)}
+.sxt .ext{margin-top:8px;border:1px solid var(--line);background:var(--card);border-radius:10px;padding:8px 12px;font-weight:700}
+.hero .sxt{background:rgba(255,255,255,.16);border:0;color:#fff;margin:2px 0 12px}
+.hero .sxt b,.hero .sxt .end,.hero .sxt .end span{color:#fff}
+.hero .sxt .end span.over{background:#dc2626;border-radius:8px;padding:1px 8px}
+.hero .sxt .ext{background:#fff;color:#0b4f49;border:0}
+.datenav button:disabled{opacity:.35}
