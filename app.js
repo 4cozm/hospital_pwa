@@ -15,6 +15,7 @@ const MOB = {
   wheel:  { label: '휠체어', escort: true },
 };
 const KEY = 'ward-schedule-v1';
+const ICS_ALARM_MIN = 10;      // 캘린더로 내보낸 일정의 알람: 시작 10분 전
 
 /* ================= 저장소 (localStorage 전용) ================= */
 function uid() { return Math.random().toString(36).slice(2, 10); }
@@ -137,7 +138,7 @@ const roomNo = e => patient(e.pid)?.room ?? 99;
 const fmtDur = n => n >= 60 ? `${Math.floor(n / 60)}시간${n % 60 ? ' ' + n % 60 + '분' : ''}` : `${n}분`;
 const hhmm = ts => { const x = new Date(ts); return `${pad(x.getHours())}:${pad(x.getMinutes())}`; };
 /* 이송→복귀 2단계 대상: 휠체어/베드 환자, 그리고 수술은 이동 방식과 상관없이 항상 */
-const twoStep = e => isSx(e) || MOB[mobOf(e)].escort;
+const isEscort = e => isSx(e) || MOB[mobOf(e)].escort;     // 모시러 가는 항목: 이송 → 복귀 요청 → 복귀 완료 (혼자는 확인 1단계)
 const stKey = (e, d) => `${e.id}|${d}`;
 const stampOf = (e, d) => db.stamps[stKey(e, d)];
 function setStamp(e, d, patch) { const k = stKey(e, d); if (patch) db.stamps[k] = { ...(db.stamps[k] || {}), ...patch }; else delete db.stamps[k]; }
@@ -146,12 +147,12 @@ function purgeOld() {
   const t = todayStr(), size = () => db.entries.length + db.surgeries.length + Object.keys(db.status).length + Object.keys(db.stamps).length;
   const before = size();
   let carried = false;
-  // 이송 완료 후 아직 복귀 체크를 안 한 환자(상태 1)는 지우지 않고 오늘로 이어서 계속 보이게 한다
+  // 이송 완료/복귀 요청 후 아직 복귀 완료를 안 한 환자는 지우지 않고 오늘로 이어서 계속 보이게 한다
   for (const x of [...db.entries, ...db.surgeries]) {
     if (x.date >= t) continue;
     const from = `${x.id}|${x.date}`, to = `${x.id}|${t}`;
-    if (db.status[from] !== 1) continue;
-    db.status[to] = 1; delete db.status[from];
+    if (!isAway(db.status[from])) continue;
+    db.status[to] = db.status[from]; delete db.status[from];
     if (db.stamps[from]) { db.stamps[to] = db.stamps[from]; delete db.stamps[from]; }
     x.date = t; carried = true;
   }
@@ -164,9 +165,10 @@ function purgeOld() {
   if (sxDate < t) sxDate = t;
   save(); return true;
 }
-/* 상태 → 테두리 색: 시간 전=무색, 이송 완료(복귀 대기)=초록, 이송이 늦음(시간이 지났는데 아직 이송 전)=빨강, 완료=흐림 */
+/* 상태 → 테두리 색: 시간 전=무색, 이송 완료=초록, 복귀 요청=주황, 이송이 늦음(시간이 지났는데 아직 이송 전)=빨강, 완료=흐림 */
 const isLate = (e, d = date) => d === todayStr() && stOf(e, d) === 0 && tmin(e.time) < nowMin();
-const stOf = (e, d) => db.status[stKey(e, d)] || 0;   // 0 대기, 1 모시러 감/이동 중, 2 완료
+const stOf = (e, d) => db.status[stKey(e, d)] || 0;   // 0 대기 → 1 이송 완료 → 3 복귀 요청 → 2 완료 (2=완료 의미는 기존 저장 데이터와 같게 유지)
+const isAway = st => st === 1 || st === 3;            // 병동 밖에 있는 상태 (이송 완료 / 복귀 요청)
 function setSt(e, d, v) { if (v) db.status[stKey(e, d)] = v; else delete db.status[stKey(e, d)]; save(); }
 
 /* ================= 렌더 ================= */
@@ -191,7 +193,7 @@ function renderToday() {
   const list = itemsOn(date);
   const total = list.length;
   const done = list.filter(e => stOf(e, date) === 2).length;
-  const waiting = list.filter(e => twoStep(e) && stOf(e, date) === 1).length;     // 이송했고 아직 복귀 체크 안 한 환자
+  const outN = list.filter(e => stOf(e, date) === 1).length, askN = list.filter(e => stOf(e, date) === 3).length;   // 이송 중 / 복귀 요청 중
 
   $('#top').innerHTML = `
     <div class="hrow">
@@ -202,7 +204,7 @@ function renderToday() {
         <button data-act="day" data-n="1" aria-label="다음날">›</button>
       </div>
     </div>
-    <div class="sum"><span>남은 <b>${total - done}</b></span><span>완료 <b>${done}</b></span><span>전체 <b>${total}</b></span>${waiting ? `<span>복귀 대기 <b>${waiting}</b></span>` : ''}</div>`;
+    <div class="sum"><span>남은 <b>${total - done}</b></span><span>완료 <b>${done}</b></span><span>전체 <b>${total}</b></span>${outN ? `<span>이송 중 <b>${outN}</b></span>` : ''}${askN ? `<span>복귀 요청 <b>${askN}</b></span>` : ''}</div>`;
 
   let html = backupBanner();
   const now = nowMin();
@@ -222,13 +224,14 @@ function renderToday() {
   $('#view').innerHTML = html;
 }
 
-const advShort = (e, st) => (twoStep(e) ? (st === 0 ? '이송' : '복귀') : '확인');
-/* 이송 후 경과: 이송 완료를 누른 뒤 얼마나 지났는지 (표시만, 경고 없음) */
+const advShort = (e, st) => (isEscort(e) ? (st === 0 ? '이송' : st === 1 ? '복귀 요청' : '복귀 완료') : '확인');
+/* 이송 후 경과: 이송 완료를 누른 뒤 얼마나 지났는지, 복귀 요청 후에는 요청 후 경과도 (표시만, 경고 없음) */
 function awayHtml(e) {
-  if (isSx(e) || stOf(e, date) !== 1) return '';              // 수술은 자체 타이머가 있음
+  const st = stOf(e, date);
+  if (isSx(e) || !isAway(st)) return '';                       // 수술은 자체 타이머가 있음
   const s = stampOf(e, date); if (!s || !s.out) return '';
-  const el = Math.max(0, Math.floor((Date.now() - s.out) / 60000));
-  return `<div class="away">이송 후 <b>${fmtDur(el)}</b> 경과</div>`;
+  const mins = ts => Math.max(0, Math.floor((Date.now() - ts) / 60000));
+  return `<div class="away">이송 후 <b>${fmtDur(mins(s.out))}</b> 경과${st === 3 && s.req ? ` · 복귀 요청 후 <b>${fmtDur(mins(s.req))}</b>` : ''}</div>`;
 }
 /* 수술: 이송 완료 시점부터 예상 소요시간을 세어 예상 종료 시각 표시 (지연되면 지연 시간 표시) */
 function sxLine(e) {
@@ -240,7 +243,8 @@ function sxLine(e) {
     const end = s.out + (e.dur || 60) * 60000, left = Math.ceil((end - Date.now()) / 60000);
     return `<div class="sxt">시작 ${hhmm(s.out)} · 예상 종료 <b>${hhmm(end)}</b> · <span class="${left < 0 ? 'over' : ''}">${left >= 0 ? `${fmtDur(left)} 남음` : `${fmtDur(-left)} 지연`}</span></div>`;
   }
-  return `<div class="sxt">이송 ${hhmm(s.out)}${s.back ? ` → 복귀 ${hhmm(s.back)}` : ''}</div>`;
+  if (st === 3) return `<div class="sxt">시작 ${hhmm(s.out)}${s.req ? ` · 복귀 요청 ${hhmm(s.req)}` : ''}</div>`;
+  return `<div class="sxt">이송 ${hhmm(s.out)}${s.req ? ` · 복귀 요청 ${hhmm(s.req)}` : ''}${s.back ? ` → 복귀 ${hhmm(s.back)}` : ''}</div>`;
 }
 
 /* 목적지: 어디로 가는지(시술/수술 + 장소 메모)를 누르지 않아도 바로 보이게 */
@@ -259,8 +263,8 @@ function card(e) {
   const note = [p.note, sx ? '' : e.memo].filter(Boolean).map(esc).join(' · ');
   const side = st === 2
     ? `<span class="fin">완료</span><button class="mini" data-act="undo" data-id="${e.id}">되돌리기</button>`
-    : `<button class="ab ${twoStep(e) && st === 1 ? 'back' : ''}" data-act="adv" data-id="${e.id}">${advShort(e, st)}</button>${st === 1 ? `<button class="mini" data-act="undo" data-id="${e.id}">되돌리기</button>` : ''}`;
-  return `<article class="tc ${st === 1 ? 'moving' : ''} ${isLate(e) ? 'late' : ''} ${st === 2 ? 'done' : ''}">
+    : `<button class="ab ${st === 1 ? 'req' : st === 3 ? 'back' : ''}" data-act="adv" data-id="${e.id}">${advShort(e, st)}</button>${isAway(st) ? `<button class="mini" data-act="undo" data-id="${e.id}">되돌리기</button>` : ''}`;
+  return `<article class="tc ${st === 1 ? 'moving' : ''} ${st === 3 ? 'asking' : ''} ${isLate(e) ? 'late' : ''} ${st === 2 ? 'done' : ''}">
     <div class="tb">
       <div class="t1"><b class="rt">${roomTag(p)}</b><span class="n">${esc(p.name)}</span>${sx ? '<span class="chip sx">수술</span>' : mobBadge(mobOf(e))}</div>
       <div class="t2">${destInline(e)}</div>
@@ -342,7 +346,6 @@ function renderSx() {
 
 function renderSettings() {
   $('#top').innerHTML = `<div class="hrow"><h1>설정</h1></div>`;
-  const perm = 'Notification' in window ? Notification.permission : 'unsupported';
   const si = storageInfo();
   $('#view').innerHTML = `
   <div class="set"><h3>저장 상태</h3>
@@ -356,14 +359,8 @@ function renderSettings() {
     ${db.cats.map(c => `<button class="pl" data-act="editCat" data-id="${c.id}"><div><div class="who"><span class="pill">${esc(c.label)}</span></div>
       <div class="note" style="margin-top:4px">${c.memo ? esc(c.memo) : '장소 메모 없음'}${(c.alias || []).length ? ` · 별칭: ${esc(c.alias.join(', '))}` : ''}</div></div></button>`).join('') || '<p class="note">아직 등록된 시술이 없습니다.</p>'}
     <button class="btn pri" data-act="addCat">＋ 시술 추가</button></div>
-  <div class="set"><h3>알림</h3>
-    <div class="f"><label>치료 몇 분 전에 알릴까요</label>
-      <select id="lead">${[0, 5, 10, 15, 20, 30].map(n => `<option value="${n}" ${db.settings.lead === n ? 'selected' : ''}>${n ? n + '분 전' : '정각'}</option>`).join('')}</select></div>
-    <p>상태: <b>${{ granted: '허용됨', denied: '차단됨 (브라우저 설정에서 변경)', default: '아직 요청 안 함', unsupported: '이 브라우저는 미지원' }[perm]}</b></p>
-    <button class="btn pri" data-act="perm">알림 권한 요청</button>
-    <p>⚠️ 서버가 없어서 <b>앱이 열려 있을 때만</b> 알림이 울립니다. 앱이 꺼져 있어도 울리는 알림이 필요하면 아래 <b>캘린더로 내보내기</b>를 쓰세요.</p></div>
   <div class="set"><h3>폰 캘린더로 내보내기 (서버 없이 확실한 알람)</h3>
-    <p>${fmtDate(date)} 일정을 .ics 파일로 받아 폰 캘린더에 넣으면 OS가 알람을 울려줍니다.</p>
+    <p>${fmtDate(date)} 일정을 .ics 파일로 받아 폰 캘린더에 넣으면 시작 ${ICS_ALARM_MIN}분 전에 OS가 알람을 울려줍니다. (앱이 꺼져 있어도 울립니다)</p>
     <button class="btn" data-act="ics">${fmtDate(date)} 일정 내보내기</button></div>
   <div class="set"><h3>백업</h3>
     <p>브라우저 데이터 삭제·기기 변경 시 사라지니 ${BACKUP_EVERY_DAYS}일에 한 번은 백업하세요. 마지막 백업: <b>${db.settings.lastBackup ? fmtTs(db.settings.lastBackup) : '없음'}</b></p>
@@ -375,7 +372,6 @@ function renderSettings() {
     <button class="btn danger" data-act="wipe">전체 삭제</button></div>
   <p class="note" style="text-align:center">환자 정보는 외부로 전송되지 않습니다 · 모든 데이터는 로컬 저장</p>`;
   persistState().then(v => { const el = $('#persistState'); if (el) el.textContent = { granted: '허용됨 (브라우저가 임의로 지우지 않음)', default: '아직 허용되지 않음 (홈 화면에 추가하면 허용될 수 있음)', unsupported: '이 브라우저는 미지원' }[v]; });
-  $('#lead').onchange = e => { db.settings.lead = Number(e.target.value); save(); };
   $('#file').onchange = importFile;
 }
 
@@ -692,13 +688,17 @@ document.addEventListener('click', ev => {
     }
     case 'adv': {
       const e = entry(), st = stOf(e, date);
-      if (twoStep(e) && st === 0) { setStamp(e, date, { out: Date.now() }); setSt(e, date, 1); }
-      else { if (twoStep(e)) setStamp(e, date, { back: Date.now() }); setSt(e, date, 2); }
+      if (!isEscort(e)) setSt(e, date, 2);                                              // 혼자: 확인 한 번
+      else if (st === 0) { setStamp(e, date, { out: Date.now() }); setSt(e, date, 1); }   // 이송
+      else if (st === 1) { setStamp(e, date, { req: Date.now() }); setSt(e, date, 3); }   // 복귀 요청
+      else if (st === 3) { setStamp(e, date, { back: Date.now() }); setSt(e, date, 2); }  // 복귀 완료
       render(); break;
     }
     case 'undo': {
       const e = entry(), st = stOf(e, date);
-      if (st === 2 && twoStep(e)) { const s = stampOf(e, date); if (s) delete s.back; setSt(e, date, 1); }
+      const s = stampOf(e, date);                                                       // 한 단계씩만 뒤로
+      if (st === 2 && isEscort(e)) { if (s) delete s.back; setSt(e, date, 3); }
+      else if (st === 3) { if (s) delete s.req; setSt(e, date, 1); }
       else { setStamp(e, date, null); setSt(e, date, 0); }
       render(); break;
     }
@@ -715,7 +715,6 @@ document.addEventListener('click', ev => {
       }
       break;
     }
-    case 'perm': if ('Notification' in window) Notification.requestPermission().then(render); break;
     case 'ics': exportIcs(); break;
     case 'export':
       download(`ward-backup-${todayStr()}.json`, 'application/json', JSON.stringify(db, null, 1));
@@ -729,7 +728,6 @@ document.addEventListener('click', ev => {
     case 'wipe':
       if (confirm('모든 환자·일정 데이터를 삭제합니다. 되돌릴 수 없습니다.')) { db = { ...db, patients: [], entries: [], surgeries: [], status: {}, stamps: {} }; save(); render(); }
       break;
-    case 'toastGo': t.closest('.toast').remove(); tab = 'today'; date = todayStr(); render(); break;
   }
 });
 $('#fab').onclick = () => tab === 'rooms' ? patientForm() : tab === 'sx' ? sxForm() : entryForm();
@@ -758,38 +756,24 @@ function exportIcs() {
     return ['BEGIN:VEVENT', `UID:${e.id}-${d0}@ward-schedule`, `DTSTAMP:${d0}T000000`,
       `DTSTART:${d0}T${h}${m}00`, `DTEND:${d0}T${pad(Math.floor(end / 60) % 24)}${pad(end % 60)}00`,
       `SUMMARY:${ics(`${p.room}호 ${p.name} ${txLabel(e)}${isSx(e) ? '' : ` (${MOB[mobOf(e)].label})`}`)}`, `DESCRIPTION:${ics(memoOf(e) || '')}`,
-      'BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:치료 이송', `TRIGGER:-PT${db.settings.lead}M`, 'END:VALARM', 'END:VEVENT'].join('\r\n');
+      'BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:치료 이송', `TRIGGER:-PT${ICS_ALARM_MIN}M`, 'END:VALARM', 'END:VEVENT'].join('\r\n');
   });
   if (!ev.length) return toast('내보낼 일정이 없습니다', '');
   download(`schedule-${date}.ics`, 'text/calendar', ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//ward-schedule//KO', ...ev, 'END:VCALENDAR'].join('\r\n'));
 }
 
 /* ================= 알림 (앱이 열려 있는 동안) ================= */
-const fired = new Set(JSON.parse(sessionStorage.getItem('fired') || '[]'));
-function toast(title, sub, go) {
+/* 짧은 안내 메시지 (저장 완료 등, 4초 후 사라짐) */
+function toast(title, sub) {
   const el = document.createElement('div'); el.className = 'toast';
-  el.innerHTML = `<div>${esc(title)}${sub ? `<small>${esc(sub)}</small>` : ''}</div>${go ? '<button data-act="toastGo">보기</button>' : ''}`;
+  el.innerHTML = `<div>${esc(title)}${sub ? `<small>${esc(sub)}</small>` : ''}</div>`;
   $('#toasts').appendChild(el);
-  setTimeout(() => el.remove(), go ? 60000 : 4000);
+  setTimeout(() => el.remove(), 4000);
 }
+/* 20초마다: 하루 지난 기록 정리 + 오늘 탭의 지연/경과 시간 갱신 */
 function tick() {
   purgeOld();
-  const d = todayStr(), now = nowMin(), lead = db.settings.lead;
-  for (const e of itemsOn(d)) {
-    if (stOf(e, d) !== 0) continue;
-    const k = stKey(e, d);
-    if (fired.has(k) || now < tmin(e.time) - lead || now > tmin(e.time) + 30) continue;
-    fired.add(k); sessionStorage.setItem('fired', JSON.stringify([...fired]));
-    const p = patient(e.pid);
-    const act = isSx(e) ? '수술 이송' : twoStep(e) ? `${MOB[mobOf(e)].label} 모시러 가기` : '혼자 이동 · 도착 확인';
-    const title = `${e.time} ${p.room}호 ${p.name}`, body = `${txLabel(e)} · ${act}`;
-    toast(title, body, true);
-    try { navigator.vibrate?.([200, 100, 200]); } catch (e) {}
-    if ('Notification' in window && Notification.permission === 'granted') {
-      navigator.serviceWorker?.getRegistration().then(r => r ? r.showNotification(title, { body, tag: k, icon: 'icons/icon-192.png' }) : new Notification(title, { body }));
-    }
-  }
-  if (tab === 'today' && date === d && !sheet.open) renderToday(); // 지연/남은시간 갱신
+  if (tab === 'today' && date === todayStr() && !sheet.open) renderToday();
 }
 
 /* ================= 예시 데이터 ================= */
