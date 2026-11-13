@@ -259,7 +259,7 @@ function card(e) {
   const note = [p.note, sx ? '' : e.memo].filter(Boolean).map(esc).join(' · ');
   const side = st === 2
     ? `<span class="fin">완료</span><button class="mini" data-act="undo" data-id="${e.id}">되돌리기</button>`
-    : `<button class="ab" data-act="adv" data-id="${e.id}">${advShort(e, st)}</button>${st === 1 ? `<button class="mini" data-act="undo" data-id="${e.id}">되돌리기</button>` : ''}`;
+    : `<button class="ab ${twoStep(e) && st === 1 ? 'back' : ''}" data-act="adv" data-id="${e.id}">${advShort(e, st)}</button>${st === 1 ? `<button class="mini" data-act="undo" data-id="${e.id}">되돌리기</button>` : ''}`;
   return `<article class="tc ${st === 1 ? 'moving' : ''} ${isLate(e) ? 'late' : ''} ${st === 2 ? 'done' : ''}">
     <div class="tb">
       <div class="t1"><b class="rt">${roomTag(p)}</b><span class="n">${esc(p.name)}</span>${sx ? '<span class="chip sx">수술</span>' : mobBadge(mobOf(e))}</div>

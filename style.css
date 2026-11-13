@@ -317,3 +317,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .chip.sx{border:1.5px solid var(--sub);color:var(--ink)}
 .tc.moving{border-color:var(--ok);box-shadow:inset 0 0 0 1px var(--ok)}
 .tc.late{border-color:var(--late);box-shadow:inset 0 0 0 1px var(--late)}
+
+/* 버튼 색: 이송/확인 = 청록, 복귀 = 빨강 */
+.tc .ab.back{background:var(--late);color:#fff}
+@media (prefers-color-scheme:dark){.tc .ab.back{color:#2b0a0a}}

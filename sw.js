@@ -1,5 +1,5 @@
 // 앱 셸 캐시 (오프라인 동작). 파일을 수정하면 VERSION을 올려야 갱신된다.
-const VERSION = 'v26';
+const VERSION = 'v27';
 const CACHE = 'ward-schedule-' + VERSION;
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'import.js', 'ai-prompt.txt', 'manifest.webmanifest',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
