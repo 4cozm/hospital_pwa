@@ -522,13 +522,13 @@ function entryForm(e, presetPid) {
   openSheet(`<h2>${isNew ? `치료 일정 추가 · 오늘 ${fmtDate(todayStr())}` : '치료 일정 수정'}</h2>
   <form id="ef">
     ${pickerHtml(e.pid)}
-    <div class="f"><label>치료 시술 (같은 시간에 여러 개 선택 가능)</label>
-      <div id="txchips" class="pills"></div>
-      <select id="txpick"></select></div>
+    <div class="f"><label>시간</label><input type="time" name="time" value="${e.time}" required></div>
     <div class="f"><label>이동 방식</label><div class="seg">
       ${Object.entries(MOB).map(([k, v]) => `<label><input type="radio" name="mob" value="${k}" ${mobOf(e) === k ? 'checked' : ''}><span class="${k}">${v.label}</span></label>`).join('')}
     </div></div>
-    <div class="f"><label>시간</label><input type="time" name="time" value="${e.time}" required></div>
+    <div class="f"><label>치료 시술 (같은 시간에 여러 개 선택 가능)</label>
+      <div id="txchips" class="pills"></div>
+      <select id="txpick"></select></div>
     <div class="f"><label>일정 메모 (선택)</label><input name="memo" value="${esc(e.memo)}" autocomplete="off"></div>
     <div class="acts">
       ${isNew ? '' : '<button type="button" class="danger" data-act="delEntry">삭제</button>'}
