@@ -1,6 +1,7 @@
 :root{
   --bg:#f4f6f5; --card:#fff; --ink:#14201e; --sub:#5b6b68; --line:#dde4e2;
   --brand:#0f766e; --brand-ink:#fff;
+  --chip-bg:#14201e; --chip-ink:#fff;
   --ok:#15803d; --ok-bg:#dcf5e4;
   --late:#dc2626;
   --r:16px;
@@ -9,6 +10,7 @@
   :root{
     --bg:#0e1514; --card:#18211f; --ink:#eaf2f0; --sub:#9bb0ac; --line:#2a3836;
     --brand:#14b8a6; --brand-ink:#06201c;
+    --chip-bg:#34433f; --chip-ink:#eaf2f0;
     --ok:#5fd68a; --ok-bg:#12341f;
     --late:#ff6b6b;
   }
@@ -43,7 +45,6 @@ main{padding:12px 16px;max-width:720px;margin:0 auto}
   font-size:32px;box-shadow:0 6px 18px rgba(0,0,0,.28)}
 #fab.hide{display:none}
 
-/* hero (다음 일정) */
 
 
 
@@ -206,9 +207,9 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 /* ===== 오늘 탭 v2: 색은 중립 + 강조(청록, 행동) + 경고(빨강, 지연) 세 가지만 ===== */
 .seg input:checked+span{border-color:var(--brand);background:var(--brand);color:var(--brand-ink)}
 .chip{display:inline-block;border-radius:8px;padding:3px 10px;font-size:14px;font-weight:800;line-height:1.3}
-.chip.escort{background:var(--ink);color:var(--bg)}
+
 .chip.solo{border:1.5px solid var(--line);color:var(--sub);padding:1.5px 9px}
-.chip.sx{border:1.5px solid var(--ink);color:var(--ink);padding:1.5px 9px}
+
 
 
 
@@ -232,8 +233,8 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 
 
 /* 맨 위 카드와 시간표 사이 구분선 */
-.divider{display:flex;align-items:center;gap:10px;margin:22px 2px 14px;color:var(--sub);font-size:13px;font-weight:800}
-.divider::before,.divider::after{content:"";flex:1;border-top:2px solid var(--line)}
+
+
 
 /* ===== 오늘 탭 간소화 ===== */
 .grp{margin-bottom:10px}
@@ -241,23 +242,23 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .gh .gt{font-size:20px;font-weight:800}
 .gh .gc{font-size:12px;color:var(--sub)}
 .gh.late .gt,.gh.late .gc{color:var(--late)}
-.hero{background:var(--brand);color:var(--brand-ink);border-radius:16px;padding:12px 14px;margin-bottom:0}
-.hero .hw{font-size:12px;font-weight:700;opacity:.85}
-.hero .hm{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:2px 0}
-.hero .ht{font-size:30px;font-weight:800;letter-spacing:-1px;line-height:1.1}
-.hero .hr{font-size:24px;font-weight:800}
-.hero .hn{font-size:22px;font-weight:700}
-.hero .chip{background:rgba(255,255,255,.22);color:#fff;border:0;font-size:12px;padding:2px 8px}
-.hero .hd{font-size:17px;font-weight:700;margin:2px 0 8px}
-.hero .away,.hero .sxt{font-size:13px;opacity:.95;margin-bottom:8px}
-.hero .away b,.hero .sxt b{color:#fff}
-.hero .sxt .over{background:#dc2626;border-radius:6px;padding:0 6px}
-.hero .go{display:block;width:100%;border:0;border-radius:12px;padding:12px;font-size:17px;font-weight:800;background:#fff;color:#0b4f49}
-.hero.empty{background:var(--ok-bg);color:var(--ok);text-align:center;font-weight:700;font-size:17px;padding:16px}
-.divider{margin:14px 2px 10px}
-.tc{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-left:5px solid var(--line);border-radius:12px;padding:9px 10px 9px 12px;margin-bottom:6px}
-.tc.esc{border-left-color:var(--ink)}
-.tc.moving{border-left-color:var(--brand)}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+.tc{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:9px 10px 9px 12px;margin-bottom:6px}
+
+
 .tc.done{opacity:.5}
 .tc .tb{flex:1;min-width:0}
 .tc .t1{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
@@ -310,3 +311,9 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .pill.skip{opacity:.45;text-decoration:line-through}
 #impGo:disabled{opacity:.45}
 .btn.sm{padding:7px 10px;font-size:13px;margin:0}
+
+/* 오늘 탭: 하이라이트 없이 시간표만. 왼쪽 띠 없음, 칩은 라이트/다크 모두 흰색 덩어리가 되지 않게 */
+.chip.escort{background:var(--chip-bg);color:var(--chip-ink)}
+.chip.sx{border:1.5px solid var(--sub);color:var(--ink)}
+.tc.moving{border-color:var(--ok);box-shadow:inset 0 0 0 1px var(--ok)}
+.tc.late{border-color:var(--late);box-shadow:inset 0 0 0 1px var(--late)}
