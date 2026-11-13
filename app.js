@@ -119,7 +119,8 @@ const txPill = (e, tag = 'button') => {
 const findItem = id => db.entries.find(e => e.id === id) || db.surgeries.find(e => e.id === id);
 
 let tab = 'today';
-let date = todayStr();
+let date = todayStr();       // 오늘 탭이 보는 날짜
+let sxDate = todayStr();     // 수술일정 탭이 보는 날짜 (오늘 탭과 분리: 수술일정에서 다른 날을 봐도 오늘 탭은 그대로)
 
 /* 해당 날짜의 치료 일정 */
 function entriesOn(d) {
@@ -144,12 +145,23 @@ function setStamp(e, d, patch) { const k = stKey(e, d); if (patch) db.stamps[k] 
 function purgeOld() {
   const t = todayStr(), size = () => db.entries.length + db.surgeries.length + Object.keys(db.status).length + Object.keys(db.stamps).length;
   const before = size();
+  let carried = false;
+  // 이송 완료 후 아직 복귀 체크를 안 한 환자(상태 1)는 지우지 않고 오늘로 이어서 계속 보이게 한다
+  for (const x of [...db.entries, ...db.surgeries]) {
+    if (x.date >= t) continue;
+    const from = `${x.id}|${x.date}`, to = `${x.id}|${t}`;
+    if (db.status[from] !== 1) continue;
+    db.status[to] = 1; delete db.status[from];
+    if (db.stamps[from]) { db.stamps[to] = db.stamps[from]; delete db.stamps[from]; }
+    x.date = t; carried = true;
+  }
   db.entries = db.entries.filter(e => e.date >= t);
   db.surgeries = db.surgeries.filter(x => x.date >= t);
   for (const k of Object.keys(db.status)) if (k.split('|')[1] < t) delete db.status[k];
   for (const k of Object.keys(db.stamps)) if (k.split('|')[1] < t) delete db.stamps[k];
-  if (size() === before) return false;
+  if (size() === before && !carried) return false;
   if (date < t) date = t;
+  if (sxDate < t) sxDate = t;
   save(); return true;
 }
 const stOf = (e, d) => db.status[stKey(e, d)] || 0;   // 0 대기, 1 모시러 감/이동 중, 2 완료
@@ -177,6 +189,7 @@ function renderToday() {
   const list = itemsOn(date);
   const total = list.length;
   const done = list.filter(e => stOf(e, date) === 2).length;
+  const waiting = list.filter(e => twoStep(e) && stOf(e, date) === 1).length;     // 이송했고 아직 복귀 체크 안 한 환자
 
   $('#top').innerHTML = `
     <div class="hrow">
@@ -187,26 +200,18 @@ function renderToday() {
         <button data-act="day" data-n="1" aria-label="다음날">›</button>
       </div>
     </div>
-    <div class="sum"><span>남은 <b>${total - done}</b></span><span>완료 <b>${done}</b></span><span>전체 <b>${total}</b></span></div>`;
+    <div class="sum"><span>남은 <b>${total - done}</b></span><span>완료 <b>${done}</b></span><span>전체 <b>${total}</b></span>${waiting ? `<span>복귀 대기 <b>${waiting}</b></span>` : ''}</div>`;
 
   let html = backupBanner();
   const now = nowMin();
-  const pending = list.filter(e => stOf(e, date) !== 2);
-  const next = isToday ? (pending.find(e => stOf(e, date) === 1) || pending.find(e => tmin(e.time) + 20 >= now) || pending[0]) : null;
-
-  // 맨 위 카드로 뽑힌 항목은 아래 시간표에서 잠시 숨겨 중복을 피한다 (끝나면 시간표에 완료 상태로 돌아옴)
-  const rest = next ? list.filter(e => e.id !== next.id) : list;
-  const showHero = isToday && total > 0;
-  if (showHero) html += next ? hero(next) : `<div class="hero empty">오늘 일정 모두 완료 🎉</div>`;
-  if (showHero && rest.length) html += `<div class="divider"><span>시간표</span></div>`;
 
   if (!total) {
     html += `<div class="empty-msg">이 날짜에 일정이 없습니다.<br>
       <button class="btn pri" data-tab="tx">치료일정에서 입력하기</button>
       ${db.patients.length ? '' : '<br><button class="btn" data-act="demo">예시 데이터 불러오기</button>'}</div>`;
   } else {
-    for (const t of [...new Set(rest.map(e => e.time))]) {
-      const g = rest.filter(e => e.time === t);
+    for (const t of [...new Set(list.map(e => e.time))]) {
+      const g = list.filter(e => e.time === t);
       const late = isToday && g.some(e => stOf(e, date) !== 2) && tmin(t) < now;
       html += `<section class="grp"><div class="gh ${late ? 'late' : ''}"><span class="gt">${t}</span>
         <span class="gc">${g.length}명${late ? ' · 지연' : ''}</span></div>${g.map(card).join('')}</section>`;
@@ -215,25 +220,6 @@ function renderToday() {
   $('#view').innerHTML = html;
 }
 
-/* 맨 위 카드: 지금/다음에 처리할 한 건 */
-function hero(e) {
-  const p = patient(e.pid), st = stOf(e, date), sx = isSx(e);
-  const diff = tmin(e.time) - nowMin();
-  const when = diff > 0 ? `${fmtDur(diff)} 후` : diff === 0 ? '지금' : `${fmtDur(-diff)} 지남`;
-  const dest = destItems(e).map(i => `${esc(i.label)}${i.memo ? ' ' + esc(i.memo.replace(/\s*\n\s*/g, ' · ')) : ''}`).join(' / ');
-  return `<div class="hero">
-    <div class="hw">${sx ? '수술 · ' : ''}${st === 1 ? (sx ? '진행 중' : '이송 중') : '다음'} · ${when}</div>
-    <div class="hm"><span class="ht">${e.time}</span><span class="hr">${roomTag(p)}</span><span class="hn">${esc(p.name)}</span>${sx ? '' : mobBadge(mobOf(e))}</div>
-    <div class="hd">→ ${dest || '(시술 미지정)'}</div>
-    ${awayHtml(e)}${sxLine(e)}
-    <button class="go" data-act="adv" data-id="${e.id}">${advLabel(e, st)}</button>
-  </div>`;
-}
-function advLabel(e, st) {
-  if (isSx(e)) return st === 0 ? '🏥 이송 완료 (수술 시작)' : '↩ 복귀 완료';
-  if (twoStep(e)) return st === 0 ? '🚶 이송 완료' : '↩ 복귀 완료';
-  return '✅ 잘 갔는지 확인';
-}
 const advShort = (e, st) => (twoStep(e) ? (st === 0 ? '이송' : '복귀') : '확인');
 /* 이송 후 경과: 이송 완료를 누른 뒤 얼마나 지났는지 (표시만, 경고 없음) */
 function awayHtml(e) {
@@ -272,7 +258,7 @@ function card(e) {
   const side = st === 2
     ? `<span class="fin">완료</span><button class="mini" data-act="undo" data-id="${e.id}">되돌리기</button>`
     : `<button class="ab" data-act="adv" data-id="${e.id}">${advShort(e, st)}</button>${st === 1 ? `<button class="mini" data-act="undo" data-id="${e.id}">되돌리기</button>` : ''}`;
-  return `<article class="tc ${twoStep(e) ? 'esc' : ''} ${st === 1 ? 'moving' : ''} ${st === 2 ? 'done' : ''}">
+  return `<article class="tc ${st === 1 ? 'moving' : ''} ${st === 2 ? 'done' : ''}">
     <div class="tb">
       <div class="t1"><b class="rt">${roomTag(p)}</b><span class="n">${esc(p.name)}</span>${sx ? '<span class="chip sx">수술</span>' : mobBadge(mobOf(e))}</div>
       <div class="t2">${destInline(e)}</div>
@@ -315,8 +301,8 @@ function renderRooms() {
   applyRoomFilter();
 }
 
-function dateHdr(title, sum) {
-  $('#top').innerHTML = `<div class="hrow"><h1>${title} · ${fmtDate(date)}</h1>
+function dateHdr(title, sum, d = date) {
+  $('#top').innerHTML = `<div class="hrow"><h1>${title} · ${fmtDate(d)}</h1>
     <div class="datenav"><button data-act="day" data-n="-1" aria-label="전날">‹</button>
     <button class="dl" data-act="day" data-n="0">오늘</button>
     <button data-act="day" data-n="1" aria-label="다음날">›</button></div></div>
@@ -345,9 +331,9 @@ function renderTx() {
     : `<div class="empty-msg">오늘 치료 일정이 없습니다.<br><button class="btn pri" data-act="addEntry">＋ 치료 일정 추가</button></div>`;
 }
 function renderSx() {
-  const list = surgeriesOn(date);
-  const up = db.surgeries.filter(s => patient(s.pid) && s.date > date).length;
-  dateHdr('수술일정', `<span>${list.length}건</span>${up ? `<span>이후 예정 ${up}건</span>` : ''}`);
+  const list = surgeriesOn(sxDate);
+  const up = db.surgeries.filter(s => patient(s.pid) && s.date > sxDate).length;
+  dateHdr('수술일정', `<span>${list.length}건</span>${up ? `<span>이후 예정 ${up}건</span>` : ''}`, sxDate);
   $('#view').innerHTML = list.length ? editRows(list, 'editEntry')
     : `<div class="empty-msg">이 날짜의 수술 일정이 없습니다.<br><button class="btn pri" data-act="addSx">＋ 수술 일정 추가</button></div>`;
 }
@@ -592,7 +578,7 @@ function catForm(c) {
 function sxForm(e, presetPid) {
   if (!db.patients.length) return noPatientSheet();
   const isNew = !e;
-  e = e || { kind: 'sx', pid: presetPid || '', date, time: '08:00', name: '', dur: 60, memo: '' };
+  e = e || { kind: 'sx', pid: presetPid || '', date: sxDate, time: '08:00', name: '', dur: 60, memo: '' };
   openSheet(`<h2>${isNew ? '수술 일정 추가' : '수술 일정 수정'}</h2>
   <form id="sf">
     ${pickerHtml(e.pid)}
@@ -617,7 +603,7 @@ function sxForm(e, presetPid) {
     if (!patient(f.get('pid'))) return toast('병실에 등록된 환자를 선택하세요', '');
     const data = { kind: 'sx', pid: f.get('pid'), date: f.get('date'), time: f.get('time'), name: f.get('name').trim(), dur: Number(f.get('dur')) || 60, memo: f.get('memo').trim() };
     if (isNew) db.surgeries.push({ id: uid(), ...data }); else Object.assign(e, data);
-    date = data.date; save(); closeSheet(); render();
+    sxDate = data.date; save(); closeSheet(); render();
   };
 }
 function pillSheet(e, cid) {
@@ -651,11 +637,20 @@ function roomSheet(no) {
 document.addEventListener('click', ev => {
   const t = ev.target.closest('[data-tab],[data-act]');
   if (!t) return;
-  if (t.dataset.tab) { tab = t.dataset.tab; render(); scrollTo(0, 0); return; }
+  if (t.dataset.tab) {
+    tab = t.dataset.tab;
+    if (tab === 'today') date = todayStr();      // 오늘 탭에 들어오면 항상 오늘부터
+    if (tab === 'sx') sxDate = todayStr();
+    render(); scrollTo(0, 0); return;
+  }
   const id = t.dataset.id, act = t.dataset.act;
   const entry = () => findItem(id);
   switch (act) {
-    case 'day': date = Number(t.dataset.n) === 0 ? todayStr() : addDays(date, Number(t.dataset.n)); render(); break;
+    case 'day': {
+      const n = Number(t.dataset.n), move = d => (n === 0 ? todayStr() : addDays(d, n));
+      if (tab === 'sx') sxDate = move(sxDate); else date = move(date);
+      render(); break;
+    }
     case 'addEntry': entryForm(); break;
     case 'addPatient': patientForm(); break;
     case 'addPatientTo': patientForm(null, Number(t.dataset.no), Number(t.dataset.bed) || 1); break;
