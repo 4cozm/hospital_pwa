@@ -257,6 +257,19 @@ function destInline(e) {
   return it.map(i => `<button class="d" data-act="pill" data-id="${e.id}" data-cid="${i.cid}"><span class="ar">→</span><span class="dn">${esc(i.label)}</span>${i.memo ? `<span class="dm">${esc(i.memo.replace(/\s*\n\s*/g, ' · '))}</span>` : ''}</button>`).join('');
 }
 
+/* 수술 환자를 데려오기 전 X-Ray 재확인 (있다고 확인하면 카드에 X-Ray 칩 표시) */
+function askXray(e) {
+  const p = patient(e.pid);
+  openSheet(`<h2>X-Ray 확인</h2>
+    <p class="xrq"><b>${esc(roomTag(p))} ${esc(p.name)}</b> 님은 X-Ray가 있나요?</p>
+    <p class="note">있다고 확인하면 카드에 <span class="chip xr">X-Ray</span> 칩이 표시됩니다.</p>
+    <div class="xrbtns">
+      <button class="xy" data-act="xrYes" data-id="${e.id}">X-Ray 있음</button>
+      <button class="xn" data-act="xrNo" data-id="${e.id}">X-Ray 없음</button>
+      <button class="xc" data-act="close">취소</button>
+    </div>`);
+}
+
 /* 오늘 시간표의 한 줄 카드: 왼쪽 정보, 오른쪽 큰 버튼 하나 */
 function card(e) {
   const p = patient(e.pid), st = stOf(e, date), sx = isSx(e);
@@ -266,7 +279,7 @@ function card(e) {
     : `<button class="ab ${st === 1 ? 'req' : st === 3 ? 'back' : ''} ${advShort(e, st).length > 5 ? 'long' : ''}" data-act="adv" data-id="${e.id}">${advShort(e, st)}</button>${isAway(st) ? `<button class="mini" data-act="undo" data-id="${e.id}">되돌리기</button>` : ''}`;
   return `<article class="tc ${st === 1 ? 'moving' : ''} ${st === 3 ? 'asking' : ''} ${isLate(e) ? 'late' : ''} ${st === 2 ? 'done' : ''}"${st === 3 ? ` style="--ph:-${Date.now() % 2400}ms"` : ''}>
     <div class="tb">
-      <div class="t1"><b class="rt">${roomTag(p)}</b><span class="n">${esc(p.name)}</span>${sx ? '<span class="chip sx">수술</span>' : mobBadge(mobOf(e))}</div>
+      <div class="t1"><b class="rt">${roomTag(p)}</b><span class="n">${esc(p.name)}</span>${sx ? '<span class="chip sx">수술</span>' : mobBadge(mobOf(e))}${stampOf(e, date)?.xray ? '<span class="chip xr">X-Ray</span>' : ''}</div>
       <div class="t2">${destInline(e)}</div>
       ${note || awayHtml(e) || sxLine(e) ? `<div class="t3">${note}${awayHtml(e)}${sxLine(e)}</div>` : ''}
     </div>
@@ -690,15 +703,21 @@ document.addEventListener('click', ev => {
       const e = entry(), st = stOf(e, date);
       if (!isEscort(e)) setSt(e, date, 2);                                              // 혼자: 확인 한 번
       else if (st === 0) { setStamp(e, date, { out: Date.now() }); setSt(e, date, 1); }   // 이송
+      else if (st === 1 && isSx(e)) { askXray(e); break; }                                // 수술: 복귀 요청 받음 전에 X-Ray 재확인
       else if (st === 1) { setStamp(e, date, { req: Date.now() }); setSt(e, date, 3); }   // 복귀 요청
       else if (st === 3) { setStamp(e, date, { back: Date.now() }); setSt(e, date, 2); }  // 복귀 완료
       render(); break;
+    }
+    case 'xrYes': case 'xrNo': {                                                         // X-Ray 확인 결과와 함께 복귀 요청 받음 처리
+      const e = entry();
+      if (e && stOf(e, date) === 1) { setStamp(e, date, { req: Date.now(), xray: act === 'xrYes' }); setSt(e, date, 3); }
+      closeSheet(); render(); break;
     }
     case 'undo': {
       const e = entry(), st = stOf(e, date);
       const s = stampOf(e, date);                                                       // 한 단계씩만 뒤로
       if (st === 2 && isEscort(e)) { if (s) delete s.back; setSt(e, date, 3); }
-      else if (st === 3) { if (s) delete s.req; setSt(e, date, 1); }
+      else if (st === 3) { if (s) { delete s.req; delete s.xray; } setSt(e, date, 1); }   // 복귀 요청 받음을 취소하면 X-Ray 확인도 초기화
       else { setStamp(e, date, null); setSt(e, date, 0); }
       render(); break;
     }
