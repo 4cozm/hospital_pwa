@@ -143,26 +143,19 @@ const stKey = (e, d) => `${e.id}|${d}`;
 const stampOf = (e, d) => db.stamps[stKey(e, d)];
 function setStamp(e, d, patch) { const k = stKey(e, d); if (patch) db.stamps[k] = { ...(db.stamps[k] || {}), ...patch }; else delete db.stamps[k]; }
 /* 하루가 지난 기록은 자연스럽게 사라지도록 삭제 (환자/병실 배정은 유지) */
+/* 하루마다 일정이 새로 시작: 자정이 지나면 어제까지의 치료/수술 일정과 이송 기록은 상태와 관계없이 모두 삭제
+   (환자와 병실 배정은 유지, 오늘 이후 날짜로 미리 잡아 둔 수술 일정도 유지) */
 function purgeOld() {
   const t = todayStr(), size = () => db.entries.length + db.surgeries.length + Object.keys(db.status).length + Object.keys(db.stamps).length;
   const before = size();
-  let carried = false;
-  // 이송 완료/복귀 요청 후 아직 복귀 완료를 안 한 환자는 지우지 않고 오늘로 이어서 계속 보이게 한다
-  for (const x of [...db.entries, ...db.surgeries]) {
-    if (x.date >= t) continue;
-    const from = `${x.id}|${x.date}`, to = `${x.id}|${t}`;
-    if (!isAway(db.status[from])) continue;
-    db.status[to] = db.status[from]; delete db.status[from];
-    if (db.stamps[from]) { db.stamps[to] = db.stamps[from]; delete db.stamps[from]; }
-    x.date = t; carried = true;
-  }
   db.entries = db.entries.filter(e => e.date >= t);
   db.surgeries = db.surgeries.filter(x => x.date >= t);
   for (const k of Object.keys(db.status)) if (k.split('|')[1] < t) delete db.status[k];
   for (const k of Object.keys(db.stamps)) if (k.split('|')[1] < t) delete db.stamps[k];
-  if (size() === before && !carried) return false;
+  const moved = date < t || sxDate < t;                 // 앱을 켜 둔 채 자정이 지나 화면이 어제 날짜에 머문 경우
   if (date < t) date = t;
   if (sxDate < t) sxDate = t;
+  if (size() === before) return moved;
   save(); return true;
 }
 /* 상태 → 테두리 색: 시간 전=무색, 이송 완료=초록, 복귀 요청=주황, 이송이 늦음(시간이 지났는데 아직 이송 전)=빨강, 완료=흐림 */
@@ -173,6 +166,7 @@ function setSt(e, d, v) { if (v) db.status[stKey(e, d)] = v; else delete db.stat
 
 /* ================= 렌더 ================= */
 function render() {
+  purgeOld();                                            // 화면을 그리기 전에 항상 어제까지의 기록부터 정리
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   $('#fab').classList.toggle('hide', tab === 'settings' || tab === 'today');
   $('#fab').setAttribute('aria-label', { tx: '치료 일정 추가', sx: '수술 일정 추가', rooms: '환자 추가' }[tab] || '추가');
