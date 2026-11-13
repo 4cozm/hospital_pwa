@@ -7,10 +7,10 @@ const ROOMS = Array.from({ length: 19 }, (_, i) => {
   return { no, code: 1200 + no, vip: no >= 12, cap: no <= 11 ? 4 : no === 19 ? 2 : 1 };
 });
 const roomOf = no => ROOMS.find(r => r.no === Number(no));
-/* 이동수단 (표시 순서: 혼자, 워커, 베드, 휠체어). escort=true 이면 모시러 가야 해서 이송→복귀 2단계 */
+/* 이동수단 (표시 순서: 혼자, 워커, 베드, 휠체어). escort=true 이면 모시러 가야 해서 이송→복귀 2단계, 혼자만 확인 1단계 */
 const MOB = {
   walk:   { label: '혼자',   escort: false },
-  walker: { label: '워커',   escort: false },
+  walker: { label: '워커',   escort: true },     // 보조가 필요해서 모시러 간다
   bed:    { label: '베드',   escort: true },
   wheel:  { label: '휠체어', escort: true },
 };
