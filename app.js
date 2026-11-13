@@ -812,4 +812,8 @@ render();
 try { navigator.storage?.persist?.(); } catch (e) {}   // 브라우저가 임의로 데이터를 지우지 못하도록 요청 (허용 여부는 브라우저 판단)
 setInterval(tick, 20000); tick();
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { tick(); if (tab === 'today') render(); } });
+/* 핀치 줌 전역 차단. iOS Safari는 viewport의 user-scalable=no를 무시하므로(접근성 정책) 제스처 이벤트와
+   두 손가락 터치를 직접 막는다. 한 손가락 스크롤/탭/길게 누르기에는 영향 없음 */
+['gesturestart', 'gesturechange', 'gestureend'].forEach(t => document.addEventListener(t, e => e.preventDefault(), { passive: false }));
+['touchstart', 'touchmove'].forEach(t => document.addEventListener(t, e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false }));   // 두 번째 손가락이 닿는 순간부터 차단
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
