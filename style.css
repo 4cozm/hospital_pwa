@@ -2,6 +2,7 @@
   --bg:#f4f6f5; --card:#fff; --ink:#14201e; --sub:#5b6b68; --line:#dde4e2;
   --brand:#0f766e; --brand-ink:#fff;
   --warn:#f97316;
+  --sx:#7c3aed; --sx-ink:#fff;
   --chip-bg:#14201e; --chip-ink:#fff;
   --ok:#15803d; --ok-bg:#dcf5e4;
   --late:#dc2626;
@@ -12,6 +13,7 @@
     --bg:#0e1514; --card:#18211f; --ink:#eaf2f0; --sub:#9bb0ac; --line:#2a3836;
     --brand:#14b8a6; --brand-ink:#06201c;
     --warn:#ffa66b;
+    --sx:#c4a1ff; --sx-ink:#1e0a3c;
     --chip-bg:#34433f; --chip-ink:#eaf2f0;
     --ok:#5fd68a; --ok-bg:#12341f;
     --late:#ff6b6b;
@@ -266,7 +268,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .tc .rt{font-size:19px;font-weight:800;min-width:40px}
 .tc .n{font-size:18px;font-weight:700}
 .tc .chip{font-size:12px;padding:1px 7px}
-.tc .chip.solo,.tc .chip.sx{padding:0 6px}
+.tc .chip.solo{padding:0 6px}
 .tc .t2{display:grid;gap:1px;margin-top:2px}
 .tc .d{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 6px;border:0;background:none;padding:0;text-align:left;font:inherit;color:inherit}
 .tc .ar{color:var(--sub);font-weight:800}
@@ -315,7 +317,8 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 
 /* 오늘 탭: 하이라이트 없이 시간표만. 왼쪽 띠 없음, 칩은 라이트/다크 모두 흰색 덩어리가 되지 않게 */
 .chip.escort{background:var(--chip-bg);color:var(--chip-ink)}
-.chip.sx{border:1.5px solid var(--sub);color:var(--ink)}
+/* 수술 칩: 보라색 (오늘 탭) */
+.chip.sx{background:var(--sx);color:var(--sx-ink);border:0}
 .tc.moving{border-color:var(--ok);box-shadow:inset 0 0 0 1px var(--ok)}
 .tc.late{border-color:var(--late);box-shadow:inset 0 0 0 1px var(--late)}
 
