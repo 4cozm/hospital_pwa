@@ -204,7 +204,7 @@ function renderToday() {
         <button data-act="day" data-n="1" aria-label="다음날">›</button>
       </div>
     </div>
-    <div class="sum"><span>남은 <b>${total - done}</b></span><span>완료 <b>${done}</b></span><span>전체 <b>${total}</b></span>${outN ? `<span>이송 중 <b>${outN}</b></span>` : ''}${askN ? `<span>복귀 요청 <b>${askN}</b></span>` : ''}</div>`;
+    <div class="sum"><span>남은 <b>${total - done}</b></span><span>완료 <b>${done}</b></span><span>전체 <b>${total}</b></span>${outN ? `<span>이송 중 <b>${outN}</b></span>` : ''}${askN ? `<span>복귀 요청 받음 <b>${askN}</b></span>` : ''}</div>`;
 
   let html = backupBanner();
   const now = nowMin();
@@ -224,7 +224,7 @@ function renderToday() {
   $('#view').innerHTML = html;
 }
 
-const advShort = (e, st) => (isEscort(e) ? (st === 0 ? '이송' : st === 1 ? '복귀 요청' : '복귀 완료') : '확인');
+const advShort = (e, st) => (isEscort(e) ? (st === 0 ? '이송' : st === 1 ? '복귀 요청 받음' : '복귀 완료') : '확인');
 /* 이송 후 경과: 이송 완료를 누른 뒤 얼마나 지났는지, 복귀 요청 후에는 요청 후 경과도 (표시만, 경고 없음) */
 function awayHtml(e) {
   const st = stOf(e, date);
