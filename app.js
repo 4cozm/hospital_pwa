@@ -264,7 +264,7 @@ function card(e) {
   const side = st === 2
     ? `<span class="fin">완료</span><button class="mini" data-act="undo" data-id="${e.id}">되돌리기</button>`
     : `<button class="ab ${st === 1 ? 'req' : st === 3 ? 'back' : ''} ${advShort(e, st).length > 5 ? 'long' : ''}" data-act="adv" data-id="${e.id}">${advShort(e, st)}</button>${isAway(st) ? `<button class="mini" data-act="undo" data-id="${e.id}">되돌리기</button>` : ''}`;
-  return `<article class="tc ${st === 1 ? 'moving' : ''} ${st === 3 ? 'asking' : ''} ${isLate(e) ? 'late' : ''} ${st === 2 ? 'done' : ''}">
+  return `<article class="tc ${st === 1 ? 'moving' : ''} ${st === 3 ? 'asking' : ''} ${isLate(e) ? 'late' : ''} ${st === 2 ? 'done' : ''}"${st === 3 ? ` style="--ph:-${Date.now() % 2400}ms"` : ''}>
     <div class="tb">
       <div class="t1"><b class="rt">${roomTag(p)}</b><span class="n">${esc(p.name)}</span>${sx ? '<span class="chip sx">수술</span>' : mobBadge(mobOf(e))}</div>
       <div class="t2">${destInline(e)}</div>
