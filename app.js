@@ -164,6 +164,8 @@ function purgeOld() {
   if (sxDate < t) sxDate = t;
   save(); return true;
 }
+/* 상태 → 테두리 색: 시간 전=무색, 이송 완료(복귀 대기)=초록, 이송이 늦음(시간이 지났는데 아직 이송 전)=빨강, 완료=흐림 */
+const isLate = (e, d = date) => d === todayStr() && stOf(e, d) === 0 && tmin(e.time) < nowMin();
 const stOf = (e, d) => db.status[stKey(e, d)] || 0;   // 0 대기, 1 모시러 감/이동 중, 2 완료
 function setSt(e, d, v) { if (v) db.status[stKey(e, d)] = v; else delete db.status[stKey(e, d)]; save(); }
 
@@ -212,7 +214,7 @@ function renderToday() {
   } else {
     for (const t of [...new Set(list.map(e => e.time))]) {
       const g = list.filter(e => e.time === t);
-      const late = isToday && g.some(e => stOf(e, date) !== 2) && tmin(t) < now;
+      const late = g.some(e => isLate(e));
       html += `<section class="grp"><div class="gh ${late ? 'late' : ''}"><span class="gt">${t}</span>
         <span class="gc">${g.length}명${late ? ' · 지연' : ''}</span></div>${g.map(card).join('')}</section>`;
     }
@@ -258,7 +260,7 @@ function card(e) {
   const side = st === 2
     ? `<span class="fin">완료</span><button class="mini" data-act="undo" data-id="${e.id}">되돌리기</button>`
     : `<button class="ab" data-act="adv" data-id="${e.id}">${advShort(e, st)}</button>${st === 1 ? `<button class="mini" data-act="undo" data-id="${e.id}">되돌리기</button>` : ''}`;
-  return `<article class="tc ${st === 1 ? 'moving' : ''} ${st === 2 ? 'done' : ''}">
+  return `<article class="tc ${st === 1 ? 'moving' : ''} ${isLate(e) ? 'late' : ''} ${st === 2 ? 'done' : ''}">
     <div class="tb">
       <div class="t1"><b class="rt">${roomTag(p)}</b><span class="n">${esc(p.name)}</span>${sx ? '<span class="chip sx">수술</span>' : mobBadge(mobOf(e))}</div>
       <div class="t2">${destInline(e)}</div>
