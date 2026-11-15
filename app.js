@@ -160,8 +160,8 @@ function purgeOld() {
 }
 /* 상태 → 테두리 색: 시간 전=무색, 이송 완료=초록, 복귀 요청=주황, 이송이 늦음(시간이 지났는데 아직 이송 전)=빨강, 완료=흐림 */
 const isLate = (e, d = date) => d === todayStr() && stOf(e, d) === 0 && tmin(e.time) < nowMin();
-const stOf = (e, d) => db.status[stKey(e, d)] || 0;   // 0 대기 → 1 이송 완료 → 3 복귀 요청 → 2 완료 (2=완료 의미는 기존 저장 데이터와 같게 유지)
-const isAway = st => st === 1 || st === 3;            // 병동 밖에 있는 상태 (이송 완료 / 복귀 요청)
+const stOf = (e, d) => db.status[stKey(e, d)] || 0;   // 0 대기 → 4 이송 요청 받음(이송 중) → 1 이송 완료 → 3 복귀 요청 받음 → 2 완료
+const isAway = st => st === 4 || st === 1 || st === 3;   // 진행 중인 상태 (이송 중 / 이송 완료 / 복귀 요청 받음) → 되돌리기 가능
 function setSt(e, d, v) { if (v) db.status[stKey(e, d)] = v; else delete db.status[stKey(e, d)]; save(); }
 
 /* ================= 렌더 ================= */
@@ -187,7 +187,7 @@ function renderToday() {
   const list = itemsOn(date);
   const total = list.length;
   const done = list.filter(e => stOf(e, date) === 2).length;
-  const outN = list.filter(e => stOf(e, date) === 1).length, askN = list.filter(e => stOf(e, date) === 3).length;   // 이송 중 / 복귀 요청 중
+  const cnt = v => list.filter(e => stOf(e, date) === v).length, carryN = cnt(4), outN = cnt(1), askN = cnt(3);   // 이송 중 / 이송 완료 / 복귀 요청 받음
 
   $('#top').innerHTML = `
     <div class="hrow">
@@ -198,7 +198,7 @@ function renderToday() {
         <button data-act="day" data-n="1" aria-label="다음날">›</button>
       </div>
     </div>
-    <div class="sum"><span>남은 <b>${total - done}</b></span><span>완료 <b>${done}</b></span><span>전체 <b>${total}</b></span>${outN ? `<span>이송 중 <b>${outN}</b></span>` : ''}${askN ? `<span>복귀 요청 받음 <b>${askN}</b></span>` : ''}</div>`;
+    <div class="sum"><span>남은 <b>${total - done}</b></span><span>완료 <b>${done}</b></span><span>전체 <b>${total}</b></span>${carryN ? `<span class="hc">이송 중 <b>${carryN}</b></span>` : ''}${outN ? `<span>이송 완료 <b>${outN}</b></span>` : ''}${askN ? `<span>복귀 요청 받음 <b>${askN}</b></span>` : ''}</div>`;
 
   let html = backupBanner();
   const now = nowMin();
@@ -218,13 +218,15 @@ function renderToday() {
   $('#view').innerHTML = html;
 }
 
-const advShort = (e, st) => (isEscort(e) ? (st === 0 ? '이송' : st === 1 ? '복귀 요청 받음' : '복귀 완료') : '확인');
+const advShort = (e, st) => (isEscort(e) ? { 0: '이송 요청 받음', 4: '이송 완료', 1: '복귀 요청 받음', 3: '복귀 완료' }[st] : '확인');
 /* 이송 후 경과: 이송 완료를 누른 뒤 얼마나 지났는지, 복귀 요청 후에는 요청 후 경과도 (표시만, 경고 없음) */
 function awayHtml(e) {
   const st = stOf(e, date);
   if (isSx(e) || !isAway(st)) return '';                       // 수술은 자체 타이머가 있음
-  const s = stampOf(e, date); if (!s || !s.out) return '';
+  const s = stampOf(e, date); if (!s) return '';
   const mins = ts => Math.max(0, Math.floor((Date.now() - ts) / 60000));
+  if (st === 4) return s.call ? `<div class="away">이송 요청 받은 지 <b>${fmtDur(mins(s.call))}</b></div>` : '';
+  if (!s.out) return '';
   return `<div class="away">이송 후 <b>${fmtDur(mins(s.out))}</b> 경과${st === 3 && s.req ? ` · 복귀 요청 후 <b>${fmtDur(mins(s.req))}</b>` : ''}</div>`;
 }
 /* 수술: 이송 완료 시점부터 예상 소요시간을 세어 예상 종료 시각 표시 (지연되면 지연 시간 표시) */
@@ -232,6 +234,7 @@ function sxLine(e) {
   if (!isSx(e)) return '';
   const st = stOf(e, date), s = stampOf(e, date);
   if (st === 0) return `<div class="sxt">예상 소요 <b>${fmtDur(e.dur || 60)}</b></div>`;
+  if (st === 4) return `<div class="sxt">${s && s.call ? `이송 요청 ${hhmm(s.call)} · ` : ''}예상 소요 <b>${fmtDur(e.dur || 60)}</b></div>`;
   if (!s) return '';
   if (st === 1) {
     const end = s.out + (e.dur || 60) * 60000, left = Math.ceil((end - Date.now()) / 60000);
@@ -270,8 +273,8 @@ function card(e) {
   const note = [p.note, sx ? '' : e.memo].filter(Boolean).map(esc).join(' · ');
   const side = st === 2
     ? `<span class="fin">완료</span><button class="mini" data-act="undo" data-id="${e.id}">되돌리기</button>`
-    : `<button class="ab ${st === 1 ? 'req' : st === 3 ? 'back' : ''} ${advShort(e, st).length > 5 ? 'long' : ''}" data-act="adv" data-id="${e.id}">${advShort(e, st)}</button>${isAway(st) ? `<button class="mini" data-act="undo" data-id="${e.id}">되돌리기</button>` : ''}`;
-  return `<article class="tc ${st === 1 ? 'moving' : ''} ${st === 3 ? 'asking' : ''} ${isLate(e) ? 'late' : ''} ${st === 2 ? 'done' : ''}"${st === 3 ? ` style="--ph:-${Date.now() % 2400}ms"` : ''}>
+    : `<button class="ab ${!isEscort(e) ? '' : st === 0 ? 'call' : st === 4 ? 'arr' : st === 1 ? 'req' : 'back'} ${advShort(e, st).length > 5 ? 'long' : ''}" data-act="adv" data-id="${e.id}">${advShort(e, st)}</button>${isAway(st) ? `<button class="mini" data-act="undo" data-id="${e.id}">되돌리기</button>` : ''}`;
+  return `<article class="tc ${st === 4 ? 'carrying' : ''} ${st === 1 ? 'moving' : ''} ${st === 3 ? 'asking' : ''} ${isLate(e) ? 'late' : ''} ${st === 2 ? 'done' : ''}"${st === 3 ? ` style="--ph:-${Date.now() % 2400}ms"` : ''}>
     <div class="tb">
       <div class="t1"><b class="rt">${roomTag(p)}</b><span class="n">${esc(p.name)}</span>${sx ? '<span class="chip sx">수술</span>' : mobBadge(mobOf(e))}${stampOf(e, date)?.xray ? '<span class="chip xr">X-Ray</span>' : ''}</div>
       <div class="t2">${destInline(e)}</div>
@@ -696,7 +699,8 @@ document.addEventListener('click', ev => {
     case 'adv': {
       const e = entry(), st = stOf(e, date);
       if (!isEscort(e)) setSt(e, date, 2);                                              // 혼자: 확인 한 번
-      else if (st === 0) { setStamp(e, date, { out: Date.now() }); setSt(e, date, 1); }   // 이송
+      else if (st === 0) { setStamp(e, date, { call: Date.now() }); setSt(e, date, 4); }  // 이송 요청 받음 (이송 중)
+      else if (st === 4) { setStamp(e, date, { out: Date.now() }); setSt(e, date, 1); }   // 이송 완료
       else if (st === 1 && isSx(e)) { askXray(e); break; }                                // 수술: 복귀 요청 받음 전에 X-Ray 재확인
       else if (st === 1) { setStamp(e, date, { req: Date.now() }); setSt(e, date, 3); }   // 복귀 요청
       else if (st === 3) { setStamp(e, date, { back: Date.now() }); setSt(e, date, 2); }  // 복귀 완료
@@ -712,6 +716,7 @@ document.addEventListener('click', ev => {
       const s = stampOf(e, date);                                                       // 한 단계씩만 뒤로
       if (st === 2 && isEscort(e)) { if (s) delete s.back; setSt(e, date, 3); }
       else if (st === 3) { if (s) { delete s.req; delete s.xray; } setSt(e, date, 1); }   // 복귀 요청 받음을 취소하면 X-Ray 확인도 초기화
+      else if (st === 1) { if (s) delete s.out; setSt(e, date, 4); }                       // 이송 완료 취소 → 다시 이송 중
       else { setStamp(e, date, null); setSt(e, date, 0); }
       render(); break;
     }
