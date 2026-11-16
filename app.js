@@ -387,7 +387,15 @@ function renderSettings() {
 
 /* ================= 시트(모달) ================= */
 const sheet = $('#sheet');
-function openSheet(html) { sheet.innerHTML = `<div class="sh">${html}</div>`; if (!sheet.open) sheet.showModal(); }
+/* 아이폰: 입력칸에 포커스하면 키보드가 가려지지 않게 Safari가 페이지를 스크롤하고, 키보드를 닫아도 되돌리지 않는다.
+   시트를 열 때 스크롤 위치를 기억했다가 닫힐 때(저장·취소·바깥 탭·ESC 모두) 그 위치로 복원한다. */
+let sheetY = null;
+function openSheet(html) { sheet.innerHTML = `<div class="sh">${html}</div>`; if (!sheet.open) { sheetY = window.scrollY; sheet.showModal(); } }
+sheet.addEventListener('close', () => {
+  const y = sheetY; sheetY = null; if (y === null) return;
+  const back = () => { if (!sheet.open && Math.abs(window.scrollY - y) > 1) window.scrollTo(0, y); };
+  back(); requestAnimationFrame(back); setTimeout(back, 350);   // 키보드가 내려가는 애니메이션 뒤에 한 번 더
+});
 function closeSheet() { if (sheet.open) sheet.close(); }
 sheet.addEventListener('click', e => { if (e.target === sheet) closeSheet(); });
 
@@ -680,8 +688,8 @@ document.addEventListener('click', ev => {
     case 'impPm': impPm(Number(t.dataset.i)); break;
     case 'impAllPm': impAllPm(); break;
     case 'impGo': impGo(); break;
-    case 'goSettings': closeSheet(); tab = 'settings'; render(); scrollTo(0, 0); break;
-    case 'goRooms': closeSheet(); tab = 'rooms'; render(); scrollTo(0, 0); break;
+    case 'goSettings': sheetY = null; closeSheet(); tab = 'settings'; render(); scrollTo(0, 0); break;
+    case 'goRooms': sheetY = null; closeSheet(); tab = 'rooms'; render(); scrollTo(0, 0); break;
     case 'pill': pillSheet(entry(), t.dataset.cid); break;
     case 'rmTx': txSel = txSel.filter(x => x !== t.dataset.cid); renderTxPicker(); break;
     case 'addCat': catForm(); break;
