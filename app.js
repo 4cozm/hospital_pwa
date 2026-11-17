@@ -366,7 +366,7 @@ function renderSettings() {
     <button class="btn" data-act="persist">영구 저장 요청</button></div>
   <div class="set"><h3>치료 시술</h3>
     <p>치료일정에서는 여기에 등록한 시술만 선택할 수 있습니다. 시술 이름과 장소 메모를 미리 써두세요. 누르면 수정·삭제합니다.</p>
-    ${db.cats.map(c => `<button class="pl" data-act="editCat" data-id="${c.id}"><div><div class="who"><span class="pill">${esc(c.label)}</span></div>
+    ${[...db.cats].sort((a, b) => a.label.localeCompare(b.label, 'ko', { numeric: true })).map(c => `<button class="pl" data-act="editCat" data-id="${c.id}"><div><div class="who"><span class="pill">${esc(c.label)}</span></div>
       <div class="note" style="margin-top:4px">${c.memo ? esc(c.memo) : '장소 메모 없음'}${(c.alias || []).length ? ` · 별칭: ${esc(c.alias.join(', '))}` : ''}</div></div></button>`).join('') || '<p class="note">아직 등록된 시술이 없습니다.</p>'}
     <button class="btn pri" data-act="addCat">＋ 시술 추가</button></div>
   <div class="set"><h3>폰 캘린더로 내보내기 (서버 없이 확실한 알람)</h3>
