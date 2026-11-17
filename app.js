@@ -800,8 +800,13 @@ function toast(title, sub) {
   setTimeout(() => el.remove(), 4000);
 }
 /* 20초마다: 하루 지난 기록 정리 + 오늘 탭의 지연/경과 시간 갱신 */
+let curDay = todayStr();
 function tick() {
-  purgeOld();
+  const changed = purgeOld();
+  if (todayStr() !== curDay) {            // 앱을 켜 둔 채(또는 백그라운드에서 복귀하며) 자정이 지남 → 어제 화면·열려 있던 입력창을 버리고 새로 그림
+    curDay = todayStr(); closeSheet(); render(); return;
+  }
+  if (changed && !sheet.open) render();   // 지워진 일정이 화면에 남지 않게 (치료·수술일정 탭 포함)
   if (tab === 'today' && date === todayStr() && !sheet.open) renderToday();
 }
 
