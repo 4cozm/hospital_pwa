@@ -29,7 +29,7 @@ function load() {
 }
 /* v1 → v2: 이동방식은 환자가 아니라 일정(entry)의 속성, 치료는 카테고리(cats) 참조 */
 function migrate(d) {
-  d.cats = d.cats || [];
+  d.cats = sortCats(d.cats || []);                 // 기존 저장 데이터도 불러올 때 한 번 정렬
   d.surgeries = d.surgeries || [];
   d.stamps = d.stamps || {};                       // 이송/복귀 시각 기록 { 'id|날짜': {out, back} }
   d.surgeries.forEach(x => { x.dur = x.dur || 60; delete x.mob; });   // 예상 수술 소요시간(분). 수술의 이동 방식은 직전에 정해지므로 저장하지 않음
@@ -58,7 +58,10 @@ function migrate(d) {
   }
   return d;
 }
+/* 시술 목록은 저장할 때마다(추가·수정·삭제·가져오기) 이름 오름차순으로 정렬해 둔다 → 설정·치료일정 선택 등 모든 곳이 같은 순서 */
+function sortCats(cats) { return cats.sort((a, b) => a.label.localeCompare(b.label, 'ko', { numeric: true })); }   // 함수 선언: load()가 먼저 호출되므로 호이스팅 필요
 function save() {
+  sortCats(db.cats);
   try { db.savedAt = Date.now(); localStorage.setItem(KEY, JSON.stringify(db)); }
   catch (e) { toast('저장 실패', '브라우저 저장공간이 가득 찼거나 차단되었습니다'); }
 }
@@ -366,7 +369,7 @@ function renderSettings() {
     <button class="btn" data-act="persist">영구 저장 요청</button></div>
   <div class="set"><h3>치료 시술</h3>
     <p>치료일정에서는 여기에 등록한 시술만 선택할 수 있습니다. 시술 이름과 장소 메모를 미리 써두세요. 누르면 수정·삭제합니다.</p>
-    ${[...db.cats].sort((a, b) => a.label.localeCompare(b.label, 'ko', { numeric: true })).map(c => `<button class="pl" data-act="editCat" data-id="${c.id}"><div><div class="who"><span class="pill">${esc(c.label)}</span></div>
+    ${db.cats.map(c => `<button class="pl" data-act="editCat" data-id="${c.id}"><div><div class="who"><span class="pill">${esc(c.label)}</span></div>
       <div class="note" style="margin-top:4px">${c.memo ? esc(c.memo) : '장소 메모 없음'}${(c.alias || []).length ? ` · 별칭: ${esc(c.alias.join(', '))}` : ''}</div></div></button>`).join('') || '<p class="note">아직 등록된 시술이 없습니다.</p>'}
     <button class="btn pri" data-act="addCat">＋ 시술 추가</button></div>
   <div class="set"><h3>폰 캘린더로 내보내기 (서버 없이 확실한 알람)</h3>
