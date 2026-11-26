@@ -248,9 +248,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 /* ===== 오늘 탭 간소화 ===== */
 .grp{margin-bottom:10px}
 /* 현재 시각 줄: 지금 이후 첫 시간대 위에 빨간 가로줄 (완료 여부와 무관). 시간표를 훑을 때 "다음 환자"의 경계가 바로 보이게 */
-.nowline{position:relative;height:0;border-top:2px solid var(--late);margin:6px 0 12px}
-.nowline span{position:absolute;right:0;top:0;background:var(--late);color:#fff;font-size:11px;font-weight:800;line-height:1;padding:3px 7px;border-radius:0 0 8px 8px}
-@media (prefers-color-scheme:dark){.nowline span{color:#2b0a0a}}
+.nowline{height:0;border-top:2px solid var(--late);margin:8px 0 14px;width:100vw;margin-left:calc(50% - 50vw);margin-right:calc(50% - 50vw)}   /* 좌우 여백 없이 화면 끝에서 끝까지 → 카드(여백 안)와 구분되는 독립 정보 */
 .gh{display:flex;align-items:baseline;gap:8px;margin:0 2px 4px}
 .gh .gt{font-size:20px;font-weight:800}
 .gh .gc{font-size:12px;color:var(--sub)}

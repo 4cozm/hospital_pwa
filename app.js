@@ -200,7 +200,7 @@ function renderToday() {
   } else {
     /* 현재 시각 줄: 완료 여부와 상관없이 "지금 이후 첫 시간대" 바로 위에 빨간 가로줄. 전부 지났으면 맨 아래, 전부 이후면 맨 위 */
     const isToday = date === todayStr(), nowHm = `${pad(Math.floor(now / 60))}:${pad(now % 60)}`;
-    const nowLine = `<div class="nowline" role="separator" aria-label="현재 시각 ${nowHm}"><span>지금 ${nowHm}</span></div>`;
+    const nowLine = `<div class="nowline" role="separator" aria-label="현재 시각 ${nowHm}"></div>`;
     let placed = !isToday;
     for (const t of [...new Set(list.map(e => e.time))]) {
       if (!placed && tmin(t) >= now) { html += nowLine; placed = true; }
