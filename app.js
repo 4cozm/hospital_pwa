@@ -629,11 +629,20 @@ function pillSheet(e, cid) {
   const c = isSx(e) ? null : db.cats.find(x => x.id === cid) || catsOf(e)[0];
   const title = isSx(e) ? txLabel(e) : (c?.label || '(시술 없음)'), memo = isSx(e) ? e.memo : c?.memo;
   const others = isSx(e) ? [] : catsOf(e).filter(x => x !== c);
+  /* 오늘 탭에서 자주 하는 일은 장소 메모(설정에서 관리)가 아니라 그날의 일정 메모 수정 → 여기서 바로 고친다.
+     수술은 장소 메모가 따로 없고 안내 메모(e.memo) 하나뿐이라 그 입력칸만 보여 준다. */
   openSheet(`<h2>${esc(title)}</h2>
-    ${memo ? `<p style="font-size:20px;line-height:1.5;margin:0 0 8px;white-space:pre-wrap">${esc(memo)}</p>` : `<p class="note">장소 메모가 없습니다. ${isSx(e) ? '수술일정에서' : '설정의 치료 시술에서'} 추가할 수 있습니다.</p>`}
+    ${isSx(e) ? '' : memo ? `<p style="font-size:20px;line-height:1.5;margin:0 0 8px;white-space:pre-wrap">${esc(memo)}</p>` : `<p class="note">장소 메모가 없습니다. 설정의 치료 시술에서 추가할 수 있습니다.</p>`}
     ${others.length ? `<p class="note">같은 일정의 다른 시술: ${others.map(x => esc(x.label)).join(', ')}</p>` : ''}
-    ${!isSx(e) && e.memo ? `<p class="note">일정 메모: ${esc(e.memo)}</p>` : ''}
-    <div class="acts"><button data-act="close">닫기</button>${c ? `<button data-act="editCat" data-id="${c.id}">장소 메모 수정</button>` : ''}</div>`);
+    <form id="mf">
+      <div class="f"><label>${isSx(e) ? '안내 메모' : '일정 메모 (오늘 특이사항)'}</label><input name="memo" value="${esc(e.memo || '')}" autocomplete="off" enterkeyhint="done"></div>
+      <div class="acts"><button type="button" data-act="close">닫기</button><button class="pri">저장</button></div>
+    </form>`);
+  $('#mf').onsubmit = ev => {
+    ev.preventDefault();
+    e.memo = new FormData(ev.target).get('memo').trim();
+    save(); closeSheet(); render();
+  };
 }
 function currentTime() { // 입력 기본값: 지금 시각 (HH:MM, 24시간)
   const d = new Date();
