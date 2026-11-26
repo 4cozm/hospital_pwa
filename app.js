@@ -198,12 +198,18 @@ function renderToday() {
       <button class="btn pri" data-tab="tx">치료일정에서 입력하기</button>
       ${db.patients.length ? '' : '<br><button class="btn" data-act="demo">예시 데이터 불러오기</button>'}</div>`;
   } else {
+    /* 현재 시각 줄: 완료 여부와 상관없이 "지금 이후 첫 시간대" 바로 위에 빨간 가로줄. 전부 지났으면 맨 아래, 전부 이후면 맨 위 */
+    const isToday = date === todayStr(), nowHm = `${pad(Math.floor(now / 60))}:${pad(now % 60)}`;
+    const nowLine = `<div class="nowline" role="separator" aria-label="현재 시각 ${nowHm}"><span>지금 ${nowHm}</span></div>`;
+    let placed = !isToday;
     for (const t of [...new Set(list.map(e => e.time))]) {
+      if (!placed && tmin(t) >= now) { html += nowLine; placed = true; }
       const g = list.filter(e => e.time === t);
       const late = g.some(e => isLate(e));
       html += `<section class="grp"><div class="gh ${late ? 'late' : ''}"><span class="gt">${t}</span>
         <span class="gc">${g.length}명${late ? ' · 지연' : ''}</span></div>${g.map(card).join('')}</section>`;
     }
+    if (!placed) html += nowLine;
   }
   $('#view').innerHTML = html;
 }
