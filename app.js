@@ -25,7 +25,7 @@ function load() {
     const d = JSON.parse(localStorage.getItem(KEY));
     if (d && d.patients && d.entries) return migrate({ status: {}, stamps: {}, settings: { lead: 10 }, cats: [], surgeries: [], ...d });
   } catch (e) {}
-  return { patients: [], entries: [], status: {}, stamps: {}, settings: { lead: 10, firstUse: Date.now() }, cats: [], surgeries: [] };
+  return { patients: [], entries: [], status: {}, stamps: {}, settings: { lead: 10 }, cats: [], surgeries: [] };
 }
 /* v1 → v2: 이동방식은 환자가 아니라 일정(entry)의 속성, 치료는 카테고리(cats) 참조 */
 function migrate(d) {
@@ -34,7 +34,6 @@ function migrate(d) {
   d.stamps = d.stamps || {};                       // 이송/복귀 시각 기록 { 'id|날짜': {out, back} }
   d.surgeries.forEach(x => { x.dur = x.dur || 60; delete x.mob; });   // 예상 수술 소요시간(분). 수술의 이동 방식은 직전에 정해지므로 저장하지 않음
   d.settings = d.settings || { lead: 10 };
-  d.settings.firstUse = d.settings.firstUse || Date.now();   // 백업 안내 기준일
   const P = id => d.patients.find(p => p.id === id);
   for (const e of d.entries) {
     if (!e.mob) e.mob = P(e.pid)?.mob || 'walk';
@@ -67,24 +66,11 @@ function save() {
 }
 
 /* ================= 저장 상태 / 백업 ================= */
-const DAY = 864e5, BACKUP_EVERY_DAYS = 7;
 const fmtTs = ts => { if (!ts) return '없음'; const d = new Date(ts); return `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 function storageInfo() {
   let chars = 0; try { chars = (localStorage.getItem(KEY) || '').length; } catch (e) {}
   const kb = chars / 1024;
   return { kb, text: kb < 1024 ? `${kb.toFixed(1)}KB` : `${(kb / 1024).toFixed(2)}MB`, pct: (chars / 5e6 * 100) };   // localStorage 한도 약 5M자 (브라우저별 상이)
-}
-/* 백업 안내: 환자가 있고, 마지막 백업(없으면 최초 사용일)에서 7일 이상 지났고, 오늘 "나중에"를 안 눌렀을 때 */
-function backupDue() {
-  if (!db.patients.length || db.settings.snooze === todayStr()) return null;
-  const base = db.settings.lastBackup || db.settings.firstUse || Date.now();
-  const days = Math.floor((Date.now() - base) / DAY);
-  return days >= BACKUP_EVERY_DAYS ? { days, never: !db.settings.lastBackup } : null;
-}
-function backupBanner() {
-  const due = backupDue(); if (!due) return '';
-  return `<div class="bk"><span>💾 ${due.never ? `백업한 적이 없습니다 (사용 ${due.days}일째)` : `마지막 백업 ${due.days}일 전`}</span>
-    <button data-act="export">지금 백업</button><button class="alt" data-act="snooze">나중에</button></div>`;
 }
 async function persistState() {
   if (!navigator.storage?.persisted) return 'unsupported';
@@ -203,7 +189,7 @@ function renderToday() {
     </div>
     <div class="sum"><span>남은 <b>${total - done}</b></span><span>완료 <b>${done}</b></span><span>전체 <b>${total}</b></span>${carryN ? `<span class="hc">이송 중 <b>${carryN}</b></span>` : ''}${outN ? `<span>이송 완료 <b>${outN}</b></span>` : ''}${askN ? `<span>복귀 요청 받음 <b>${askN}</b></span>` : ''}</div>`;
 
-  let html = backupBanner();
+  let html = '';
   const now = nowMin();
 
   if (!total) {
@@ -376,7 +362,7 @@ function renderSettings() {
     <p>${fmtDate(date)} 일정을 .ics 파일로 받아 폰 캘린더에 넣으면 시작 ${ICS_ALARM_MIN}분 전에 OS가 알람을 울려줍니다. (앱이 꺼져 있어도 울립니다)</p>
     <button class="btn" data-act="ics">${fmtDate(date)} 일정 내보내기</button></div>
   <div class="set"><h3>백업</h3>
-    <p>브라우저 데이터 삭제·기기 변경 시 사라지니 ${BACKUP_EVERY_DAYS}일에 한 번은 백업하세요. 마지막 백업: <b>${db.settings.lastBackup ? fmtTs(db.settings.lastBackup) : '없음'}</b></p>
+    <p>브라우저 데이터 삭제·기기 변경 시 사라지니 필요하면 백업하세요. 마지막 백업: <b>${db.settings.lastBackup ? fmtTs(db.settings.lastBackup) : '없음'}</b></p>
     <button class="btn" data-act="export">JSON 내보내기</button>
     <button class="btn" data-act="import">JSON 불러오기</button>
     <input type="file" id="file" accept="application/json" hidden></div>
@@ -757,7 +743,6 @@ document.addEventListener('click', ev => {
     case 'export':
       download(`ward-backup-${todayStr()}.json`, 'application/json', JSON.stringify(db, null, 1));
       db.settings.lastBackup = Date.now(); save(); render(); toast('백업 파일을 저장했습니다', ''); break;
-    case 'snooze': db.settings.snooze = todayStr(); save(); render(); break;
     case 'persist':
       if (!navigator.storage?.persist) { toast('이 브라우저는 영구 저장을 지원하지 않습니다', ''); break; }
       navigator.storage.persist().then(ok => { toast(ok ? '영구 저장이 허용되었습니다' : '브라우저가 허용하지 않았습니다', ok ? '' : '홈 화면에 추가해서 쓰면 허용될 수 있습니다'); render(); }); break;
