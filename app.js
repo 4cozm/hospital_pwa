@@ -25,7 +25,7 @@ function load() {
     const d = JSON.parse(localStorage.getItem(KEY));
     if (d && d.patients && d.entries) return migrate({ status: {}, stamps: {}, settings: { lead: 10 }, cats: [], surgeries: [], ...d });
   } catch (e) {}
-  return { patients: [], entries: [], status: {}, stamps: {}, settings: { lead: 10, firstUse: Date.now() }, cats: [], surgeries: [] };
+  return { patients: [], entries: [], status: {}, stamps: {}, settings: { lead: 10 }, cats: [], surgeries: [] };
 }
 /* v1 → v2: 이동방식은 환자가 아니라 일정(entry)의 속성, 치료는 카테고리(cats) 참조 */
 function migrate(d) {
@@ -34,7 +34,6 @@ function migrate(d) {
   d.stamps = d.stamps || {};                       // 이송/복귀 시각 기록 { 'id|날짜': {out, back} }
   d.surgeries.forEach(x => { x.dur = x.dur || 60; delete x.mob; });   // 예상 수술 소요시간(분). 수술의 이동 방식은 직전에 정해지므로 저장하지 않음
   d.settings = d.settings || { lead: 10 };
-  d.settings.firstUse = d.settings.firstUse || Date.now();   // 백업 안내 기준일
   const P = id => d.patients.find(p => p.id === id);
   for (const e of d.entries) {
     if (!e.mob) e.mob = P(e.pid)?.mob || 'walk';
@@ -67,24 +66,11 @@ function save() {
 }
 
 /* ================= 저장 상태 / 백업 ================= */
-const DAY = 864e5, BACKUP_EVERY_DAYS = 7;
 const fmtTs = ts => { if (!ts) return '없음'; const d = new Date(ts); return `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 function storageInfo() {
   let chars = 0; try { chars = (localStorage.getItem(KEY) || '').length; } catch (e) {}
   const kb = chars / 1024;
   return { kb, text: kb < 1024 ? `${kb.toFixed(1)}KB` : `${(kb / 1024).toFixed(2)}MB`, pct: (chars / 5e6 * 100) };   // localStorage 한도 약 5M자 (브라우저별 상이)
-}
-/* 백업 안내: 환자가 있고, 마지막 백업(없으면 최초 사용일)에서 7일 이상 지났고, 오늘 "나중에"를 안 눌렀을 때 */
-function backupDue() {
-  if (!db.patients.length || db.settings.snooze === todayStr()) return null;
-  const base = db.settings.lastBackup || db.settings.firstUse || Date.now();
-  const days = Math.floor((Date.now() - base) / DAY);
-  return days >= BACKUP_EVERY_DAYS ? { days, never: !db.settings.lastBackup } : null;
-}
-function backupBanner() {
-  const due = backupDue(); if (!due) return '';
-  return `<div class="bk"><span>💾 ${due.never ? `백업한 적이 없습니다 (사용 ${due.days}일째)` : `마지막 백업 ${due.days}일 전`}</span>
-    <button data-act="export">지금 백업</button><button class="alt" data-act="snooze">나중에</button></div>`;
 }
 async function persistState() {
   if (!navigator.storage?.persisted) return 'unsupported';
@@ -172,6 +158,7 @@ function render() {
   purgeOld();                                            // 화면을 그리기 전에 항상 어제까지의 기록부터 정리
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   $('#fab').classList.toggle('hide', tab === 'settings' || tab === 'today');
+  $('#fab').dataset.view = tab;                          // 추가 버튼 색도 탭 색을 따름 (치료=파랑, 수술=보라)
   $('#fab').setAttribute('aria-label', { tx: '치료 일정 추가', sx: '수술 일정 추가', rooms: '환자 추가' }[tab] || '추가');
   if (tab !== 'rooms') roomQuery = '';
   ({ today: renderToday, tx: renderTx, sx: renderSx, rooms: renderRooms, settings: renderSettings })[tab]();
@@ -203,7 +190,7 @@ function renderToday() {
     </div>
     <div class="sum"><span>남은 <b>${total - done}</b></span><span>완료 <b>${done}</b></span><span>전체 <b>${total}</b></span>${carryN ? `<span class="hc">이송 중 <b>${carryN}</b></span>` : ''}${outN ? `<span>이송 완료 <b>${outN}</b></span>` : ''}${askN ? `<span>복귀 요청 받음 <b>${askN}</b></span>` : ''}</div>`;
 
-  let html = backupBanner();
+  let html = '';
   const now = nowMin();
 
   if (!total) {
@@ -211,12 +198,18 @@ function renderToday() {
       <button class="btn pri" data-tab="tx">치료일정에서 입력하기</button>
       ${db.patients.length ? '' : '<br><button class="btn" data-act="demo">예시 데이터 불러오기</button>'}</div>`;
   } else {
+    /* 현재 시각 줄: 완료 여부와 상관없이 "지금 이후 첫 시간대" 바로 위에 빨간 가로줄. 전부 지났으면 맨 아래, 전부 이후면 맨 위 */
+    const isToday = date === todayStr(), nowHm = `${pad(Math.floor(now / 60))}:${pad(now % 60)}`;
+    const nowLine = `<div class="nowline" role="separator" aria-label="현재 시각 ${nowHm}"></div>`;
+    let placed = !isToday;
     for (const t of [...new Set(list.map(e => e.time))]) {
+      if (!placed && tmin(t) >= now) { html += nowLine; placed = true; }
       const g = list.filter(e => e.time === t);
       const late = g.some(e => isLate(e));
       html += `<section class="grp"><div class="gh ${late ? 'late' : ''}"><span class="gt">${t}</span>
         <span class="gc">${g.length}명${late ? ' · 지연' : ''}</span></div>${g.map(card).join('')}</section>`;
     }
+    if (!placed) html += nowLine;
   }
   $('#view').innerHTML = html;
 }
@@ -277,7 +270,7 @@ function card(e) {
   const side = st === 2
     ? `<span class="fin">완료</span><button class="mini" data-act="undo" data-id="${e.id}">되돌리기</button>`
     : `<button class="ab ${!isEscort(e) ? '' : st === 0 ? 'call' : st === 4 ? 'arr' : st === 1 ? 'req' : 'back'} ${advShort(e, st).length > 5 ? 'long' : ''}" data-act="adv" data-id="${e.id}">${advShort(e, st)}</button>${isAway(st) ? `<button class="mini" data-act="undo" data-id="${e.id}">되돌리기</button>` : ''}`;
-  return `<article class="tc ${st === 4 ? 'carrying' : ''} ${st === 1 ? 'moving' : ''} ${st === 3 ? 'asking' : ''} ${isLate(e) ? 'late' : ''} ${st === 2 ? 'done' : ''}"${st === 3 ? ` style="--ph:-${Date.now() % 2400}ms"` : ''}>
+  return `<article class="tc ${st === 4 ? 'carrying' : ''} ${st === 1 ? 'moving' : ''} ${st === 3 ? 'asking' : ''} ${isLate(e) ? 'late' : ''} ${st === 2 ? 'done' : ''}"${st === 3 || st === 4 ? ` style="--ph:-${Date.now() % 2400}ms"` : ''}>
     <div class="tb">
       <div class="t1"><b class="rt">${roomTag(p)}</b><span class="n">${esc(p.name)}</span>${sx ? '<span class="chip sx">수술</span>' : mobBadge(mobOf(e))}${stampOf(e, date)?.xray ? '<span class="chip xr">X-Ray</span>' : ''}</div>
       <div class="t2">${destInline(e)}</div>
@@ -376,7 +369,7 @@ function renderSettings() {
     <p>${fmtDate(date)} 일정을 .ics 파일로 받아 폰 캘린더에 넣으면 시작 ${ICS_ALARM_MIN}분 전에 OS가 알람을 울려줍니다. (앱이 꺼져 있어도 울립니다)</p>
     <button class="btn" data-act="ics">${fmtDate(date)} 일정 내보내기</button></div>
   <div class="set"><h3>백업</h3>
-    <p>브라우저 데이터 삭제·기기 변경 시 사라지니 ${BACKUP_EVERY_DAYS}일에 한 번은 백업하세요. 마지막 백업: <b>${db.settings.lastBackup ? fmtTs(db.settings.lastBackup) : '없음'}</b></p>
+    <p>브라우저 데이터 삭제·기기 변경 시 사라지니 필요하면 백업하세요. 마지막 백업: <b>${db.settings.lastBackup ? fmtTs(db.settings.lastBackup) : '없음'}</b></p>
     <button class="btn" data-act="export">JSON 내보내기</button>
     <button class="btn" data-act="import">JSON 불러오기</button>
     <input type="file" id="file" accept="application/json" hidden></div>
@@ -629,11 +622,20 @@ function pillSheet(e, cid) {
   const c = isSx(e) ? null : db.cats.find(x => x.id === cid) || catsOf(e)[0];
   const title = isSx(e) ? txLabel(e) : (c?.label || '(시술 없음)'), memo = isSx(e) ? e.memo : c?.memo;
   const others = isSx(e) ? [] : catsOf(e).filter(x => x !== c);
+  /* 오늘 탭에서 자주 하는 일은 장소 메모(설정에서 관리)가 아니라 그날의 일정 메모 수정 → 여기서 바로 고친다.
+     수술은 장소 메모가 따로 없고 안내 메모(e.memo) 하나뿐이라 그 입력칸만 보여 준다. */
   openSheet(`<h2>${esc(title)}</h2>
-    ${memo ? `<p style="font-size:20px;line-height:1.5;margin:0 0 8px;white-space:pre-wrap">${esc(memo)}</p>` : `<p class="note">장소 메모가 없습니다. ${isSx(e) ? '수술일정에서' : '설정의 치료 시술에서'} 추가할 수 있습니다.</p>`}
+    ${isSx(e) ? '' : memo ? `<p style="font-size:20px;line-height:1.5;margin:0 0 8px;white-space:pre-wrap">${esc(memo)}</p>` : `<p class="note">장소 메모가 없습니다. 설정의 치료 시술에서 추가할 수 있습니다.</p>`}
     ${others.length ? `<p class="note">같은 일정의 다른 시술: ${others.map(x => esc(x.label)).join(', ')}</p>` : ''}
-    ${!isSx(e) && e.memo ? `<p class="note">일정 메모: ${esc(e.memo)}</p>` : ''}
-    <div class="acts"><button data-act="close">닫기</button>${c ? `<button data-act="editCat" data-id="${c.id}">장소 메모 수정</button>` : ''}</div>`);
+    <form id="mf">
+      <div class="f"><label>${isSx(e) ? '안내 메모' : '일정 메모 (오늘 특이사항)'}</label><input name="memo" value="${esc(e.memo || '')}" autocomplete="off" enterkeyhint="done"></div>
+      <div class="acts"><button type="button" data-act="close">닫기</button><button class="pri">저장</button></div>
+    </form>`);
+  $('#mf').onsubmit = ev => {
+    ev.preventDefault();
+    e.memo = new FormData(ev.target).get('memo').trim();
+    save(); closeSheet(); render();
+  };
 }
 function currentTime() { // 입력 기본값: 지금 시각 (HH:MM, 24시간)
   const d = new Date();
@@ -748,7 +750,6 @@ document.addEventListener('click', ev => {
     case 'export':
       download(`ward-backup-${todayStr()}.json`, 'application/json', JSON.stringify(db, null, 1));
       db.settings.lastBackup = Date.now(); save(); render(); toast('백업 파일을 저장했습니다', ''); break;
-    case 'snooze': db.settings.snooze = todayStr(); save(); render(); break;
     case 'persist':
       if (!navigator.storage?.persist) { toast('이 브라우저는 영구 저장을 지원하지 않습니다', ''); break; }
       navigator.storage.persist().then(ok => { toast(ok ? '영구 저장이 허용되었습니다' : '브라우저가 허용하지 않았습니다', ok ? '' : '홈 화면에 추가해서 쓰면 허용될 수 있습니다'); render(); }); break;

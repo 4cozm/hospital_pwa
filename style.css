@@ -46,11 +46,19 @@ main{padding:12px 16px;max-width:720px;margin:0 auto}
 /* tabs / fab */
 #tabs{position:fixed;left:0;right:0;bottom:0;z-index:6;display:flex;background:var(--card);
   border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
-#tabs button{flex:1;border:0;background:none;padding:14px 0;font-weight:700;font-size:14px;color:var(--sub);white-space:nowrap}
-#tabs button.on{color:var(--brand);box-shadow:inset 0 3px 0 var(--brand)}
+/* 탭마다 대표 색: 오늘=청록, 치료일정=파랑, 수술일정=보라, 병실·설정=중립. 선택 안 된 탭도 윗줄 색이 은은하게 보여 색만으로 구분 가능 */
+#tabs button{--tc:var(--ink);position:relative;flex:1;border:0;background:none;padding:14px 0;font-weight:700;font-size:14px;color:var(--sub);white-space:nowrap}
+#tabs button::before{content:"";position:absolute;left:14%;right:14%;top:0;height:3px;border-radius:0 0 3px 3px;background:var(--tc);opacity:.38}
+#tabs button[data-tab=today]{--tc:var(--brand)}
+#tabs button[data-tab=tx]{--tc:var(--go)}
+#tabs button[data-tab=sx]{--tc:var(--sx)}
+#tabs button.on{color:var(--tc)}
+#tabs button.on::before{left:0;right:0;opacity:1}
 #fab{position:fixed;right:16px;bottom:calc(84px + env(safe-area-inset-bottom));z-index:6;
   width:60px;height:60px;border-radius:50%;border:0;background:var(--brand);color:var(--brand-ink);
   font-size:32px;box-shadow:0 6px 18px rgba(0,0,0,.28)}
+#fab[data-view=tx]{background:var(--go);color:var(--go-ink)}
+#fab[data-view=sx]{background:var(--sx);color:var(--sx-ink)}
 #fab.hide{display:none}
 
 
@@ -193,12 +201,6 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .slot.hit{background:var(--brand);color:var(--brand-ink);border-radius:8px;padding:3px 6px;font-weight:800}
 .slot.hit .bn{background:var(--brand-ink);color:var(--brand)}
 
-/* 백업 안내 배너 */
-.bk{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);color:var(--ink);border-radius:14px;padding:10px 12px;margin-bottom:12px;font-weight:700;font-size:14px}
-.bk span{flex:1 1 100%}
-.bk button{border:0;border-radius:10px;padding:9px 14px;font-weight:800;background:var(--ink);color:var(--bg)}
-.bk button.alt{background:transparent;color:var(--ink);border:1px solid var(--line)}
-
 /* 수술 진행/예상 종료 */
 
 
@@ -245,6 +247,8 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 
 /* ===== 오늘 탭 간소화 ===== */
 .grp{margin-bottom:10px}
+/* 현재 시각 줄: 지금 이후 첫 시간대 위에 빨간 가로줄 (완료 여부와 무관). 시간표를 훑을 때 "다음 환자"의 경계가 바로 보이게 */
+.nowline{height:0;border-top:2px solid var(--late);margin:8px 0 14px;width:100vw;margin-left:calc(50% - 50vw);margin-right:calc(50% - 50vw)}   /* 좌우 여백 없이 화면 끝에서 끝까지 → 카드(여백 안)와 구분되는 독립 정보 */
 .gh{display:flex;align-items:baseline;gap:8px;margin:0 2px 4px}
 .gh .gt{font-size:20px;font-weight:800}
 .gh .gc{font-size:12px;color:var(--sub)}
@@ -338,13 +342,16 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .tc .ab{min-height:44px}
 .tc .ab.long{font-size:13px}
 
-/* 복귀 요청 받음: 테두리 고리가 느리게 점멸 (2.4초 주기). 얇은 주황 테두리는 항상 남기고 굵은 고리만 깜빡임.
+/* 이송 중(파랑) · 복귀 요청 받음(주황): 지금 처리 중인 환자 → 테두리 고리가 크게, 느리게(2.4초) 점멸.
+   굵은 고리(5px)만 완전히 켜졌다 꺼짐 (번짐/glow 없음). 얇은 테두리는 항상 남음.
    위상을 시계(--ph)에 맞춰서 20초마다 화면을 다시 그려도 깜빡임이 끊기지 않고 모든 카드가 동시에 깜빡임 */
 .tc{position:relative}
-.tc.asking::after{content:"";position:absolute;inset:-1px;border:3px solid var(--warn);border-radius:12px;pointer-events:none;
+.tc.carrying{--bc:var(--go)}
+.tc.asking{--bc:var(--warn)}
+.tc.carrying::after,.tc.asking::after{content:"";position:absolute;inset:-2px;border:5px solid var(--bc);border-radius:14px;pointer-events:none;
   animation:ask-blink 2.4s ease-in-out infinite;animation-delay:var(--ph,0ms)}
-@keyframes ask-blink{0%,100%{opacity:1}50%{opacity:.1}}
-@media (prefers-reduced-motion:reduce){.tc.asking::after{animation:none;opacity:1}}
+@keyframes ask-blink{0%,100%{opacity:1}50%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.tc.carrying::after,.tc.asking::after{animation:none;opacity:1}}
 
 /* X-Ray 칩(파랑) / X-Ray 재확인 팝업 */
 .chip.xr{background:var(--xr);color:var(--xr-ink);border:0}
