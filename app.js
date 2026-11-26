@@ -264,7 +264,7 @@ function card(e) {
   const side = st === 2
     ? `<span class="fin">완료</span><button class="mini" data-act="undo" data-id="${e.id}">되돌리기</button>`
     : `<button class="ab ${!isEscort(e) ? '' : st === 0 ? 'call' : st === 4 ? 'arr' : st === 1 ? 'req' : 'back'} ${advShort(e, st).length > 5 ? 'long' : ''}" data-act="adv" data-id="${e.id}">${advShort(e, st)}</button>${isAway(st) ? `<button class="mini" data-act="undo" data-id="${e.id}">되돌리기</button>` : ''}`;
-  return `<article class="tc ${st === 4 ? 'carrying' : ''} ${st === 1 ? 'moving' : ''} ${st === 3 ? 'asking' : ''} ${isLate(e) ? 'late' : ''} ${st === 2 ? 'done' : ''}"${st === 3 ? ` style="--ph:-${Date.now() % 2400}ms"` : ''}>
+  return `<article class="tc ${st === 4 ? 'carrying' : ''} ${st === 1 ? 'moving' : ''} ${st === 3 ? 'asking' : ''} ${isLate(e) ? 'late' : ''} ${st === 2 ? 'done' : ''}"${st === 3 || st === 4 ? ` style="--ph:-${Date.now() % 2400}ms"` : ''}>
     <div class="tb">
       <div class="t1"><b class="rt">${roomTag(p)}</b><span class="n">${esc(p.name)}</span>${sx ? '<span class="chip sx">수술</span>' : mobBadge(mobOf(e))}${stampOf(e, date)?.xray ? '<span class="chip xr">X-Ray</span>' : ''}</div>
       <div class="t2">${destInline(e)}</div>
