@@ -158,6 +158,7 @@ function render() {
   purgeOld();                                            // 화면을 그리기 전에 항상 어제까지의 기록부터 정리
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   $('#fab').classList.toggle('hide', tab === 'settings' || tab === 'today');
+  $('#fab').dataset.view = tab;                          // 추가 버튼 색도 탭 색을 따름 (치료=파랑, 수술=보라)
   $('#fab').setAttribute('aria-label', { tx: '치료 일정 추가', sx: '수술 일정 추가', rooms: '환자 추가' }[tab] || '추가');
   if (tab !== 'rooms') roomQuery = '';
   ({ today: renderToday, tx: renderTx, sx: renderSx, rooms: renderRooms, settings: renderSettings })[tab]();
