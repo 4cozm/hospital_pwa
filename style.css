@@ -342,14 +342,14 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .tc .ab{min-height:44px}
 .tc .ab.long{font-size:13px}
 
-/* 이송 중(파랑) · 복귀 요청 받음(주황): 지금 처리 중인 환자 → 테두리 고리가 크게, 느리게(2.4초) 점멸.
+/* 이송 중(파랑) · 복귀 요청 받음(주황): 지금 처리 중인 환자 → 테두리 고리가 크게, 빠르게(0.8초) 점멸.
    굵은 고리(5px)만 완전히 켜졌다 꺼짐 (번짐/glow 없음). 얇은 테두리는 항상 남음.
    위상을 시계(--ph)에 맞춰서 20초마다 화면을 다시 그려도 깜빡임이 끊기지 않고 모든 카드가 동시에 깜빡임 */
 .tc{position:relative}
 .tc.carrying{--bc:var(--go)}
 .tc.asking{--bc:var(--warn)}
 .tc.carrying::after,.tc.asking::after{content:"";position:absolute;inset:-2px;border:5px solid var(--bc);border-radius:14px;pointer-events:none;
-  animation:ask-blink 2.4s ease-in-out infinite;animation-delay:var(--ph,0ms)}
+  animation:ask-blink .8s ease-in-out infinite;animation-delay:var(--ph,0ms)}
 @keyframes ask-blink{0%,100%{opacity:1}50%{opacity:0}}
 @media (prefers-reduced-motion:reduce){.tc.carrying::after,.tc.asking::after{animation:none;opacity:1}}
 
