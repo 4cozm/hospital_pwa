@@ -242,7 +242,8 @@ function sxLine(e) {
 
 /* 목적지: 어디로 가는지(시술/수술 + 장소 메모)를 누르지 않아도 바로 보이게 */
 function destItems(e) {
-  return isSx(e) ? [{ label: e.name, memo: e.memo, cid: '' }] : catsOf(e).map(c => ({ label: c.label, memo: c.memo, cid: c.id }));
+  /* 수술 안내 메모는 아래 강조 줄(.tm)에 따로 표시하므로 여기서는 비움 */
+  return isSx(e) ? [{ label: e.name, memo: '', cid: '' }] : catsOf(e).map(c => ({ label: c.label, memo: c.memo, cid: c.id }));
 }
 function destInline(e) {
   const it = destItems(e);
@@ -266,7 +267,8 @@ function askXray(e) {
 /* 오늘 시간표의 한 줄 카드: 왼쪽 정보, 오른쪽 큰 버튼 하나 */
 function card(e) {
   const p = patient(e.pid), st = stOf(e, date), sx = isSx(e);
-  const note = [p.note, sx ? '' : e.memo].filter(Boolean).map(esc).join(' · ');
+  const note = esc(p.note || '');                       // 환자 메모(계속 유효) — 흐리게
+  const memo = (e.memo || '').trim();                   // 일정 메모(그날의 특이사항) — 포스트잇처럼 강조
   const side = st === 2
     ? `<span class="fin">완료</span><button class="mini" data-act="undo" data-id="${e.id}">되돌리기</button>`
     : `<button class="ab ${!isEscort(e) ? '' : st === 0 ? 'call' : st === 4 ? 'arr' : st === 1 ? 'req' : 'back'} ${advShort(e, st).length > 5 ? 'long' : ''}" data-act="adv" data-id="${e.id}">${advShort(e, st)}</button>${isAway(st) ? `<button class="mini" data-act="undo" data-id="${e.id}">되돌리기</button>` : ''}`;
@@ -274,6 +276,7 @@ function card(e) {
     <div class="tb">
       <div class="t1"><b class="rt">${roomTag(p)}</b><span class="n">${esc(p.name)}</span>${sx ? '<span class="chip sx">수술</span>' : mobBadge(mobOf(e))}${stampOf(e, date)?.xray ? '<span class="chip xr">X-Ray</span>' : ''}</div>
       <div class="t2">${destInline(e)}</div>
+      ${memo ? `<div class="tm">${esc(memo)}</div>` : ''}
       ${note || awayHtml(e) || sxLine(e) ? `<div class="t3">${note}${awayHtml(e)}${sxLine(e)}</div>` : ''}
     </div>
     <div class="ta">${side}</div>
