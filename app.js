@@ -150,7 +150,22 @@ function purgeOld() {
 /* 상태 → 테두리 색: 시간 전=무색, 이송 완료=초록, 복귀 요청=주황, 이송이 늦음(시간이 지났는데 아직 이송 전)=빨강, 완료=흐림 */
 const isLate = (e, d = date) => d === todayStr() && stOf(e, d) === 0 && tmin(e.time) < nowMin();
 const stOf = (e, d) => db.status[stKey(e, d)] || 0;   // 0 대기 → 4 이송 요청 받음(이송 중) → 1 이송 완료 → 3 복귀 요청 받음 → 2 완료
+const sameTids = (a, b) => a.length === b.length && a.every(x => b.includes(x));
 const isAway = st => st === 4 || st === 1 || st === 3;   // 진행 중인 상태 (이송 중 / 이송 완료 / 복귀 요청 받음) → 되돌리기 가능
+/* 일정이 지워지거나(삭제·퇴원·시술 삭제) 진행 기록이 무의미해질 때 그 일정의 상태·시각 기록을 함께 지운다 (고아 기록 방지) */
+function forgetState(ids) {
+  const s = new Set(ids);
+  for (const k of Object.keys(db.status)) if (s.has(k.split('|')[0])) delete db.status[k];
+  for (const k of Object.keys(db.stamps)) if (s.has(k.split('|')[0])) delete db.stamps[k];
+}
+/* 진행 중(이송 중·이송 완료·복귀 요청)인 일정의 환자나 이동 방식이 바뀌어 기록이 맞지 않게 되면 대기로 되돌린다.
+   (예: 휠체어로 이송 중에 '혼자'로 바꾸면 혼자 환자가 이송 완료 상태로 남던 문제) */
+function reconcileState(e, before) {
+  const st = stOf(e, e.date || date);
+  if (!isAway(st)) return false;
+  if (e.pid === before.pid && (isSx(e) || isEscort(e))) return false;
+  forgetState([e.id]); return true;
+}
 function setSt(e, d, v) { if (v) db.status[stKey(e, d)] = v; else delete db.status[stKey(e, d)]; save(); }
 
 /* ================= 렌더 ================= */
@@ -535,6 +550,7 @@ function entryForm(e, presetPid) {
   if (!db.patients.length) return noPatientSheet();
   if (!db.cats.length) return noCatSheet();
   const isNew = !e;
+  txSel = [];                                           // 선택 중인 시술은 폼을 열 때마다 비운 뒤 시작 (새 일정은 항상 빈 상태)
   e = e || { pid: presetPid || '', time: currentTime(), tids: [], mob: presetPid ? lastMob(presetPid) : 'walk', memo: '' };
   openSheet(`<h2>${isNew ? `치료 일정 추가 · 오늘 ${fmtDate(todayStr())}` : '치료 일정 수정'}</h2>
   <form id="ef">
@@ -565,8 +581,13 @@ function entryForm(e, presetPid) {
     if (!patient(f.get('pid'))) return toast('병실에 등록된 환자를 선택하세요', '');
     if (!txSel.length) return toast('치료 시술을 하나 이상 선택하세요', '');
     const data = { pid: f.get('pid'), time: f.get('time'), tids: [...txSel], mob: f.get('mob'), memo: f.get('memo').trim() };
-    if (isNew) db.entries.push({ id: uid(), date: todayStr(), ...data }); else Object.assign(e, data);   // 날짜는 항상 오늘
+    const same = db.entries.find(x => x !== e && x.date === todayStr() && x.pid === data.pid && x.time === data.time && sameTids(x.tids, data.tids));
+    if (same) return toast('같은 시간에 같은 치료가 이미 있습니다', '시간이나 시술을 바꾸거나, 기존 일정을 수정하세요');
+    let reset = false;
+    if (isNew) db.entries.push({ id: uid(), date: todayStr(), ...data });   // 날짜는 항상 오늘
+    else { const before = { pid: e.pid }; Object.assign(e, data); reset = reconcileState(e, before); }
     save(); closeSheet(); render();
+    if (reset) toast('이송 진행 상태를 초기화했습니다', '환자 또는 이동 방식이 바뀌어 대기 상태로 되돌렸습니다');
   };
 }
 function catForm(c) {
@@ -617,8 +638,15 @@ function sxForm(e, presetPid) {
     const f = new FormData(ev.target);
     if (!patient(f.get('pid'))) return toast('병실에 등록된 환자를 선택하세요', '');
     const data = { kind: 'sx', pid: f.get('pid'), date: f.get('date'), time: f.get('time'), name: f.get('name').trim(), dur: Number(f.get('dur')) || 60, memo: f.get('memo').trim() };
-    if (isNew) db.surgeries.push({ id: uid(), ...data }); else Object.assign(e, data);
+    let reset = false;
+    if (isNew) db.surgeries.push({ id: uid(), ...data });
+    else {                                               // 진행 기록은 (일정, 날짜)에 묶여 있으므로 날짜나 환자가 바뀌면 대기로 되돌림
+      reset = (e.date !== data.date || e.pid !== data.pid) && Object.keys(db.status).some(k => k.split('|')[0] === e.id);
+      if (e.date !== data.date || e.pid !== data.pid) forgetState([e.id]);
+      Object.assign(e, data);
+    }
     sxDate = data.date; save(); closeSheet(); render();
+    if (reset) toast('이송 진행 상태를 초기화했습니다', '날짜 또는 환자가 바뀌어 대기 상태로 되돌렸습니다');
   };
 }
 function pillSheet(e, cid) {
@@ -683,7 +711,7 @@ document.addEventListener('click', ev => {
     case 'addSx': sxForm(); break;
     case 'delSx': {
       const eid = sheet.dataset.eid;
-      if (confirm('이 수술 일정을 삭제할까요?')) { db.surgeries = db.surgeries.filter(x => x.id !== eid); save(); closeSheet(); render(); }
+      if (confirm('이 수술 일정을 삭제할까요?')) { db.surgeries = db.surgeries.filter(x => x.id !== eid); forgetState([eid]); save(); closeSheet(); render(); }
       break;
     }
     case 'room': roomSheet(Number(t.dataset.no)); break;
@@ -708,6 +736,7 @@ document.addEventListener('click', ev => {
       if (confirm(msg)) {
         db.cats = db.cats.filter(c => c.id !== cid);
         db.entries.forEach(e => { e.tids = e.tids.filter(x => x !== cid); });
+        forgetState(db.entries.filter(e => !e.tids.length).map(e => e.id));
         db.entries = db.entries.filter(e => e.tids.length); save(); closeSheet(); render();
       }
       break;
@@ -738,12 +767,13 @@ document.addEventListener('click', ev => {
     }
     case 'delEntry': {
       const eid = sheet.dataset.eid;
-      if (confirm('이 일정을 삭제할까요?')) { db.entries = db.entries.filter(e => e.id !== eid); save(); closeSheet(); render(); }
+      if (confirm('이 일정을 삭제할까요?')) { db.entries = db.entries.filter(e => e.id !== eid); forgetState([eid]); save(); closeSheet(); render(); }
       break;
     }
     case 'delPatient': {
       const pid = sheet.dataset.pid, p = patient(pid);
       if (confirm(`${p.name} 환자를 퇴원 처리하고 일정도 모두 삭제할까요?`)) {
+        forgetState([...db.entries, ...db.surgeries].filter(x => x.pid === pid).map(x => x.id));
         db.patients = db.patients.filter(x => x.id !== pid); db.entries = db.entries.filter(e => e.pid !== pid); db.surgeries = db.surgeries.filter(x => x.pid !== pid);
         save(); closeSheet(); render();
       }
