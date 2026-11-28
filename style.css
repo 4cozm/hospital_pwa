@@ -6,6 +6,7 @@
   --xr:#1d4ed8; --xr-ink:#fff;
   --go:#2563eb; --go-ink:#fff; --go-soft:#eff6ff;
   --chip-bg:#14201e; --chip-ink:#fff;
+  --memo-bg:#fef08a; --memo-ink:#3b2f00; --memo-bar:#a16207;
   --ok:#15803d; --ok-bg:#dcf5e4;
   --late:#dc2626;
   --r:16px;
@@ -19,6 +20,7 @@
     --xr:#93c5fd; --xr-ink:#0b1f4d;
     --go:#7da6ff; --go-ink:#0b1f4d; --go-soft:#16233f;
     --chip-bg:#34433f; --chip-ink:#eaf2f0;
+    --memo-bg:#3d3300; --memo-ink:#fde68a; --memo-bar:#facc15;
     --ok:#5fd68a; --ok-bg:#12341f;
     --late:#ff6b6b;
   }
@@ -283,6 +285,8 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .tc .dn{font-size:16px;font-weight:800}
 .tc .dm{font-size:14px;color:var(--sub);font-weight:600}
 .tc .t3{font-size:13px;color:var(--sub);margin-top:2px}
+/* 일정 메모: 그날의 중요한 포인트 → 장소 메모(회색)와 달리 노란 포스트잇 + 굵은 글씨 */
+.tc .tm{margin-top:5px;padding:5px 9px;border-left:4px solid var(--memo-bar);border-radius:6px;background:var(--memo-bg);color:var(--memo-ink);font-size:15px;font-weight:800;line-height:1.35;overflow-wrap:anywhere}
 .tc .away,.tc .sxt{display:block}
 .away b,.sxt b{color:var(--ink)}
 .sxt .over{color:var(--late);font-weight:800}
